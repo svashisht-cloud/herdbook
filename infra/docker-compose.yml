@@ -1,0 +1,72 @@
+name: fleet
+
+# Step 0: infrastructure only. Robots, ingest and dashboard are added in Steps 1-4.
+# Run from this folder:  cp .env.example .env && docker compose up -d
+# Ports bind to 127.0.0.1 so nothing is reachable from your LAN.
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    # Build the password file from .env at startup, so no credential is ever committed.
+    entrypoint: >
+      sh -c 'mosquitto_passwd -c -b /mosquitto/data/passwd "$$MQTT_USER" "$$MQTT_PASSWORD" &&
+             chown mosquitto:mosquitto /mosquitto/data/passwd &&
+             chmod 0700 /mosquitto/data/passwd &&
+             exec mosquitto -c /mosquitto/config/mosquitto.conf'
+    environment:
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Init scripts run ONLY when the data volume is empty.
+      # After editing init.sql: docker compose down -v && docker compose up -d
+      - ./init.sql:/docker-entrypoint-initdb.d/010_init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    # MinIO's community edition is archived; this is the last official image.
+    # The code only talks S3, so swapping to AWS S3 or another S3 server is an endpoint change.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # web console
+    volumes:
+      - minio-data:/data
+
+  # One-shot job: wait for MinIO, create the bucket, exit 0.
+  # Reuses the MinIO image because it already ships the mc client.
+  minio-init:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    depends_on:
+      - minio
+    entrypoint: >
+      sh -c 'until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1;
+             do echo "waiting for minio..."; sleep 1; done &&
+             mc mb --ignore-existing "local/$$MINIO_BUCKET"'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    restart: "no"
+
+volumes:
+  mosquitto-data:
+  pgdata:
+  minio-data:

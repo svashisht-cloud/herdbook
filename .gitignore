@@ -1,0 +1,19 @@
+# secrets
+.env
+
+# colcon
+build/
+install/
+log/
+
+# python
+__pycache__/
+*.pyc
+
+# node
+node_modules/
+dist/
+
+# local recordings
+*.mcap
+*.db
