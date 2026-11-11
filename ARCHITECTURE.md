@@ -68,7 +68,7 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 
 | Topic | Payload | QoS, retained |
 |---|---|---|
-| `fleet/{robot_id}/telemetry` | robot_id, seq, ts, x, y, heading, speed, battery, mode | 1, no |
+| `fleet/{robot_id}/telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | 1, no |
 | `fleet/{robot_id}/status` | `online` or `offline` (Last Will) | 1, yes |
 | `fleet/{robot_id}/events` | robot_id, seq, ts, type, mcap_key, size_bytes | 1, no |
 
@@ -80,7 +80,7 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 
 | Table | Columns | Notes |
 |---|---|---|
-| `telemetry` | robot_id, seq, ts, x, y, heading, speed, battery, mode | Hypertable on `ts`; unique on (robot_id, seq, ts); inserts use `ON CONFLICT DO NOTHING` |
+| `telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | Hypertable on `ts`; unique on (robot_id, seq, ts); inserts use `ON CONFLICT DO NOTHING` |
 | `robots` | robot_id, last_seen, online, last_state | Updated on every message |
 | `incidents` | id, robot_id, ts, type, mcap_key, size_bytes | One row per clip |
 
@@ -111,6 +111,11 @@ Each entry has the format: decision — choice. Why.
 - **Robot motion** — position is calculated from time on one fixed loop (an ellipse), with a per-robot phase offset. It's the least code and easy to check on the map. The cost: no real stops, `mode` is always `driving`, and an `obstacle_stop` can't stop a robot.
 - **Events** — manual only. From a shell inside the robot: `ros2 topic pub --once /robot1/event std_msgs/msg/String "{data: '{\"type\": \"obstacle_stop\"}'}"`. fake_robot has no event timer. A clip is about 5–10 MB, so automatic events would fill storage fast. Revisit at Step 8 with a slow timer plus a MinIO expiry rule.
 - **Point-cloud QoS** — best effort on the publisher and every subscriber (`qos_profile_sensor_data`). A late scan is worthless, so there are no retries, and small gaps in clips are acceptable. A reliable subscriber gets nothing from this topic.
+
+### Step 2: edge agent (in progress)
+
+- **Threading** — paho runs its network loop in its own thread (`loop_start()`), and ROS runs `rclpy.spin()` on the main thread. paho handles reconnects and backoff, so the 2 Hz timer keeps capturing telemetry during an outage. Plan for Step 6: paho callbacks never touch SQLite. They put events on a `queue.Queue`, and one ROS timer owns the only SQLite connection.
+- **Restarts** — telemetry carries `boot_id`, edge_agent's start time in UTC ms, and `seq` restarts at 0 on each boot. A restart is a significant event: after an `offline`, a new `boot_id` means the robot restarted, and the same `boot_id` means the network dropped. Each MQTT topic has its own `seq` counter, so events never leave holes in telemetry's `seq`. The unique key stays (robot_id, seq, ts), because boots reuse `seq` but never `ts`.
 
 ## Conventions
 

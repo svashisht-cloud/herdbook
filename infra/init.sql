@@ -8,6 +8,7 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 -- That still dedupes correctly: a redelivered message carries the same ts.
 CREATE TABLE IF NOT EXISTS telemetry (
     robot_id  TEXT             NOT NULL,
+    boot_id   BIGINT           NOT NULL,
     seq       BIGINT           NOT NULL,
     ts        TIMESTAMPTZ      NOT NULL,
     x         DOUBLE PRECISION,
