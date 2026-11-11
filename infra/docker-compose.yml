@@ -12,6 +12,11 @@ x-robot: &robot
   environment: &robot-env
     # ROS topics never leave a robot: DDS discovery stays inside the container.
     ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    # Broker connection for edge_agent. Credentials come from .env, as for mosquitto.
+    MQTT_HOST: mosquitto
+    MQTT_PORT: "1883"
+    MQTT_USER: ${MQTT_USER}
+    MQTT_PASSWORD: ${MQTT_PASSWORD}
   # Lists don't merge either: each robot lists *robot-src next to its own /data volume.
   volumes:
     - &robot-src ../robot:/ws/src/herdbook_robot:ro

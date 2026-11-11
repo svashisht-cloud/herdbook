@@ -44,7 +44,7 @@ telemetry does. Large files never travel over MQTT.
 | Topic | Payload | QoS, retained |
 |---|---|---|
 | `fleet/{robot_id}/telemetry` | `robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode` | 1, no |
-| `fleet/{robot_id}/status` | `online` or `offline` (the Last Will) | 1, yes |
+| `fleet/{robot_id}/status` | `online`, `degraded` or `offline` (the Last Will) | 1, yes |
 | `fleet/{robot_id}/events` | `robot_id, seq, ts, type, mcap_key, size_bytes` | 1, no |
 
 ## Message schema
@@ -58,7 +58,7 @@ redelivered or backfilled message is identical to the original.
 | Table | Columns | Notes |
 |---|---|---|
 | `telemetry` | `robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode` | Hypertable on `ts`; unique on (`robot_id`, `seq`, `ts`) |
-| `robots` | `robot_id, last_seen, online, last_state` | Upserted on every message |
+| `robots` | `robot_id, last_seen, status, last_state` | Upserted on every message |
 | `incidents` | `id, robot_id, ts, type, mcap_key, size_bytes` | One row per clip; unique on `mcap_key` |
 
 Inserts are idempotent (`ON CONFLICT DO NOTHING`) because QoS 1 guarantees duplicates.

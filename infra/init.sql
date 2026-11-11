@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS telemetry_robot_ts ON telemetry (robot_id, ts DESC);
 CREATE TABLE IF NOT EXISTS robots (
     robot_id   TEXT PRIMARY KEY,
     last_seen  TIMESTAMPTZ,
-    online     BOOLEAN NOT NULL DEFAULT FALSE,
+    status     TEXT    NOT NULL DEFAULT 'offline',  -- online | degraded | offline
     last_state JSONB
 );
 

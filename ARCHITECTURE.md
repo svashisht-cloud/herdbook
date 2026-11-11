@@ -13,7 +13,7 @@ It's a portfolio demo: ROS 1 on-vehicle fleet tooling (from Outrider), redesigne
 ## Done means
 
 - 4 simulated robots, each with its own edge agent, start with one `docker compose up`.
-- The dashboard shows each robot's position, battery and online/offline state, live.
+- The dashboard shows each robot's position, battery and online/degraded/offline state, live.
 - A fault produces an MCAP clip in object storage that opens in Foxglove.
 - Cutting a robot's network for 60 s loses no data; it backfills on reconnect.
 - There's a README with the architecture, trade-offs and a recording.
@@ -69,11 +69,11 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 | Topic | Payload | QoS, retained |
 |---|---|---|
 | `fleet/{robot_id}/telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | 1, no |
-| `fleet/{robot_id}/status` | `online` or `offline` (Last Will) | 1, yes |
+| `fleet/{robot_id}/status` | `online`, `degraded` or `offline` (Last Will is `offline`) | 1, yes |
 | `fleet/{robot_id}/events` | robot_id, seq, ts, type, mcap_key, size_bytes | 1, no |
 
 - `ts` is UTC milliseconds. `seq` counts up per robot.
-- The Last Will sets status to `offline` (retained). The robot publishes `online` (retained) on connect.
+- The Last Will sets status to `offline` (retained). The robot publishes its current state (`online` or `degraded`, retained) on every (re)connect and whenever it changes.
 - Keepalive is 5 s.
 
 ## Tables
@@ -81,7 +81,7 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 | Table | Columns | Notes |
 |---|---|---|
 | `telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | Hypertable on `ts`; unique on (robot_id, seq, ts); inserts use `ON CONFLICT DO NOTHING` |
-| `robots` | robot_id, last_seen, online, last_state | Updated on every message |
+| `robots` | robot_id, last_seen, status, last_state | Updated on every message; `status` is `online`, `degraded` or `offline` (default `offline`) |
 | `incidents` | id, robot_id, ts, type, mcap_key, size_bytes | One row per clip |
 
 ## Decisions log
@@ -116,6 +116,9 @@ Each entry has the format: decision — choice. Why.
 
 - **Threading** — paho runs its network loop in its own thread (`loop_start()`), and ROS runs `rclpy.spin()` on the main thread. paho handles reconnects and backoff, so the 2 Hz timer keeps capturing telemetry during an outage. Plan for Step 6: paho callbacks never touch SQLite. They put events on a `queue.Queue`, and one ROS timer owns the only SQLite connection.
 - **Restarts** — telemetry carries `boot_id`, edge_agent's start time in UTC ms, and `seq` restarts at 0 on each boot. A restart is a significant event: after an `offline`, a new `boot_id` means the robot restarted, and the same `boot_id` means the network dropped. Each MQTT topic has its own `seq` counter, so events never leave holes in telemetry's `seq`. The unique key stays (robot_id, seq, ts), because boots reuse `seq` but never `ts`.
+- **Downsampling** — a 2 Hz timer builds each message from the newest odom, battery and diagnostics. Each topic has its own freshness threshold (1 s for all three here; real diagnostics often run at 1 Hz and would need longer). If any topic is stale, the timer skips the send.
+- **Degraded status** — `fleet/{robot_id}/status` is `online`, `degraded` or `offline`, retained, QoS 1. edge_agent publishes `degraded` when any topic goes stale and `online` when all are fresh again. It publishes only when the state changes, plus its current state on every (re)connect. The Last Will stays `offline`. This separates "connected but its data is stale" from "gone" without adding nullable telemetry fields. A brief `degraded` at startup, before the first messages arrive, is expected.
+- **MQTT settings** — `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER` and `MQTT_PASSWORD` are set once in the `x-robot` env map. The credentials come from `infra/.env`, the same variables mosquitto uses. One source of truth, and nothing secret in the repo.
 
 ## Conventions
 
