@@ -1,15 +1,79 @@
 name: fleet
 
-# Step 0: infrastructure only. Robots, ingest and dashboard are added in Steps 1-4.
+# Step 0: infrastructure. Step 1: four simulated robots. Ingest and dashboard come in later steps.
 # Run from this folder:  cp .env.example .env && docker compose up -d
 # Ports bind to 127.0.0.1 so nothing is reachable from your LAN.
 
+# Shared robot template. YAML merge keys are shallow, so each robot's `environment`
+# must merge *robot-env itself, or it would replace the template's whole map.
+x-robot: &robot
+  build: ../robot
+  image: fleet-robot
+  environment: &robot-env
+    # ROS topics never leave a robot: DDS discovery stays inside the container.
+    ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+  # Lists don't merge either: each robot lists *robot-src next to its own /data volume.
+  volumes:
+    - &robot-src ../robot:/ws/src/herdbook_robot:ro
+  # Read-only source; colcon builds into the container's own /ws (build/, install/, log/),
+  # never into the mounted folder. `restart robotN` rebuilds and runs the current code.
+  # The .bashrc line gives `docker compose exec robotN bash` the same environment.
+  command:
+    - bash
+    - -c
+    - |
+      set -e
+      cd /ws
+      colcon build --symlink-install
+      grep -qxF 'source /ws/install/setup.bash' /root/.bashrc || echo 'source /ws/install/setup.bash' >> /root/.bashrc
+      source /ws/install/setup.bash
+      exec ros2 launch herdbook_robot robot.launch.py robot_id:="$$ROBOT_ID"
+
 services:
+  robot1:
+    <<: *robot
+    environment:
+      <<: *robot-env
+      ROBOT_ID: robot1
+    volumes:
+      - *robot-src
+      - robot1-data:/data
+
+  robot2:
+    <<: *robot
+    environment:
+      <<: *robot-env
+      ROBOT_ID: robot2
+    volumes:
+      - *robot-src
+      - robot2-data:/data
+
+  robot3:
+    <<: *robot
+    environment:
+      <<: *robot-env
+      ROBOT_ID: robot3
+    volumes:
+      - *robot-src
+      - robot3-data:/data
+
+  robot4:
+    <<: *robot
+    environment:
+      <<: *robot-env
+      ROBOT_ID: robot4
+    volumes:
+      - *robot-src
+      - robot4-data:/data
+
   mosquitto:
     image: eclipse-mosquitto:2
     # Build the password file from .env at startup, so no credential is ever committed.
+    # Delete it first: mosquitto_passwd -c refuses to overwrite an existing file, and the
+    # file lives on the data volume, so without this every restart after the first fails.
     entrypoint: >
-      sh -c 'mosquitto_passwd -c -b /mosquitto/data/passwd "$$MQTT_USER" "$$MQTT_PASSWORD" &&
+      sh -c 'rm -f /mosquitto/data/passwd &&
+             mosquitto_passwd -c -b /mosquitto/data/passwd "$$MQTT_USER" "$$MQTT_PASSWORD" &&
              chown mosquitto:mosquitto /mosquitto/data/passwd &&
              chmod 0700 /mosquitto/data/passwd &&
              exec mosquitto -c /mosquitto/config/mosquitto.conf'
@@ -73,3 +137,8 @@ volumes:
   mosquitto-data:
   pgdata:
   minio-data:
+  # Per-robot SQLite queue (Step 6). Unused until then.
+  robot1-data:
+  robot2-data:
+  robot3-data:
+  robot4-data:
