@@ -1,0 +1,186 @@
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #1f2328;
+  background: #f6f7f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: #57606a;
+}
+
+.muted {
+  color: #6e7781;
+  font-weight: normal;
+  font-size: 13px;
+}
+
+.live {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+}
+.live.on {
+  background: #1f9d55;
+}
+.live.off {
+  background: #cf222e;
+}
+
+.banner {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fff1f0;
+  border: 1px solid #f5c2c0;
+  color: #82071e;
+  font-size: 14px;
+}
+
+main {
+  margin-top: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.yard,
+.fleet,
+.charts {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+}
+
+.yard {
+  width: 100%;
+  display: block;
+}
+.yard .grid line {
+  stroke: #eef0f2;
+  stroke-width: 0.15;
+}
+.yard .border {
+  fill: none;
+  stroke: #c4cad1;
+  stroke-width: 0.25;
+}
+.yard .robot {
+  cursor: pointer;
+}
+.yard .robot text {
+  font-size: 2.2px;
+  text-anchor: middle;
+  fill: #1f2328;
+  pointer-events: none;
+}
+.yard .halo {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 0.4;
+}
+
+.fleet {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+  overflow: hidden;
+}
+.fleet th,
+.fleet td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eef0f2;
+}
+.fleet th {
+  font-size: 12px;
+  color: #57606a;
+  font-weight: 600;
+}
+.fleet .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fleet tbody tr {
+  cursor: pointer;
+}
+.fleet tbody tr:hover {
+  background: #f6f8fa;
+}
+.fleet tbody tr.selected {
+  background: #eaf1ff;
+}
+
+.badge {
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.charts {
+  padding: 12px 16px;
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.chart {
+  font-size: 12px;
+}
+
+.error {
+  color: #cf222e;
+  font-size: 13px;
+}
+
+.hint {
+  margin: 0;
+}
