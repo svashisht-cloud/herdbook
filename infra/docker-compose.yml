@@ -9,6 +9,11 @@ name: fleet
 x-robot: &robot
   build: ../robot
   image: fleet-robot
+  # ros2 launch runs as PID 1 and handles SIGINT only. Linux drops signals that PID 1
+  # has no handler for, so the default SIGTERM did nothing: Docker SIGKILLed the
+  # container, nodes never ran their shutdown, and the broker sent the Last Will.
+  # SIGINT makes launch forward SIGINT to every node for a clean shutdown.
+  stop_signal: SIGINT
   environment: &robot-env
     # ROS topics never leave a robot: DDS discovery stays inside the container.
     ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST

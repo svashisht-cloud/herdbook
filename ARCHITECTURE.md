@@ -75,6 +75,7 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 - `ts` is UTC milliseconds. `seq` counts up per robot.
 - The Last Will sets status to `offline` (retained). The robot publishes its current state (`online` or `degraded`, retained) on every (re)connect and whenever it changes.
 - Keepalive is 5 s.
+- `ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
 
 ## Tables
 
@@ -112,13 +113,14 @@ Each entry has the format: decision — choice. Why.
 - **Events** — manual only. From a shell inside the robot: `ros2 topic pub --once /robot1/event std_msgs/msg/String "{data: '{\"type\": \"obstacle_stop\"}'}"`. fake_robot has no event timer. A clip is about 5–10 MB, so automatic events would fill storage fast. Revisit at Step 8 with a slow timer plus a MinIO expiry rule.
 - **Point-cloud QoS** — best effort on the publisher and every subscriber (`qos_profile_sensor_data`). A late scan is worthless, so there are no retries, and small gaps in clips are acceptable. A reliable subscriber gets nothing from this topic.
 
-### Step 2: edge agent (in progress)
+### Step 2: edge agent (done)
 
 - **Threading** — paho runs its network loop in its own thread (`loop_start()`), and ROS runs `rclpy.spin()` on the main thread. paho handles reconnects and backoff, so the 2 Hz timer keeps capturing telemetry during an outage. Plan for Step 6: paho callbacks never touch SQLite. They put events on a `queue.Queue`, and one ROS timer owns the only SQLite connection.
 - **Restarts** — telemetry carries `boot_id`, edge_agent's start time in UTC ms, and `seq` restarts at 0 on each boot. A restart is a significant event: after an `offline`, a new `boot_id` means the robot restarted, and the same `boot_id` means the network dropped. Each MQTT topic has its own `seq` counter, so events never leave holes in telemetry's `seq`. The unique key stays (robot_id, seq, ts), because boots reuse `seq` but never `ts`.
 - **Downsampling** — a 2 Hz timer builds each message from the newest odom, battery and diagnostics. Each topic has its own freshness threshold (1 s for all three here; real diagnostics often run at 1 Hz and would need longer). If any topic is stale, the timer skips the send.
 - **Degraded status** — `fleet/{robot_id}/status` is `online`, `degraded` or `offline`, retained, QoS 1. edge_agent publishes `degraded` when any topic goes stale and `online` when all are fresh again. It publishes only when the state changes, plus its current state on every (re)connect. The Last Will stays `offline`. This separates "connected but its data is stale" from "gone" without adding nullable telemetry fields. A brief `degraded` at startup, before the first messages arrive, is expected.
 - **MQTT settings** — `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER` and `MQTT_PASSWORD` are set once in the `x-robot` env map. The credentials come from `infra/.env`, the same variables mosquitto uses. One source of truth, and nothing secret in the repo.
+- **Robot stop signal** — `stop_signal: SIGINT` in the `x-robot` template. `ros2 launch` runs as PID 1 and handles only SIGINT, and Linux drops signals that PID 1 has no handler for. With Docker's default SIGTERM, `docker compose stop` did nothing until Docker SIGKILLed the container (exit 137): no node ran its shutdown, and `offline` came from the Last Will. With SIGINT, launch forwards SIGINT to every node, edge_agent publishes `offline` itself, and the stop takes under 0.5 s.
 
 ## Conventions
 

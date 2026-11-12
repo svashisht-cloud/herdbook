@@ -53,6 +53,8 @@ JSON. Every message carries `robot_id`, `seq` (counts up per robot) and `ts` (UT
 `ts` is set when the message is created on the robot, not when it is sent, so a
 redelivered or backfilled message is identical to the original.
 
+`ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
+
 ## Tables
 
 | Table | Columns | Notes |
