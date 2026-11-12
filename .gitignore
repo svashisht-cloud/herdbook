@@ -17,3 +17,6 @@ dist/
 # local recordings
 *.mcap
 *.db
+
+# macOS
+.DS_Store
