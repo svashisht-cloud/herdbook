@@ -143,7 +143,6 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET}
-      MINIO_ENDPOINT: http://minio:9000
       # Presigned URLs are signed for the host the browser uses (decisions log).
       MINIO_PUBLIC_URL: http://localhost:9000
     ports:

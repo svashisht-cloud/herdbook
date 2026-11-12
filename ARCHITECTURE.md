@@ -54,7 +54,7 @@ ROS topics never leave a robot. Inside each robot:
 
 - **fake_robot** publishes at 10 Hz: `odom` (nav_msgs/Odometry), `battery` (sensor_msgs/BatteryState) and `diagnostics` (diagnostic_msgs/DiagnosticArray). Events (`event`, a JSON string in std_msgs/String such as `obstacle_stop`) are published by hand (see the decisions log). It also publishes `points` (PointCloud2, 1–2k points at 5 Hz).
 - **edge_agent** subscribes to `odom`, `battery` and `diagnostics`, downsamples to 2 Hz and publishes to MQTT. Every outgoing message goes into its SQLite queue first. A sender loop publishes in order and deletes a row only when the broker acks it. On reconnect it drains the backlog at a capped rate.
-- **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom` and `diagnostics` in a ring buffer. On an `event` it records 30 s more, writes one MCAP and uploads it to MinIO at `incidents/{robot_id}/{event_ts}.mcap`, retrying with backoff. It then hands the metadata to edge_agent. Large files never go over MQTT.
+- **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom` and `diagnostics` in a ring buffer. On an `event` it records 30 s more, writes one MCAP and uploads it to MinIO's `incidents` bucket with key `{robot_id}/{event_ts}.mcap` (event_ts in UTC ms), retrying with backoff. It then hands the metadata to edge_agent. Large files never go over MQTT.
 
 In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fleet/+/events` at QoS 1 and writes to TimescaleDB, committing each message before it's acked. Malformed messages are logged and skipped. It serves on 127.0.0.1:8000 (all timestamps as UTC ms):
 
@@ -75,6 +75,7 @@ In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fle
 - `ts` is UTC milliseconds. `seq` counts up per robot.
 - The Last Will sets status to `offline` (retained). The robot publishes its current state (`online` or `degraded`, retained) on every (re)connect and whenever it changes.
 - Keepalive is 5 s.
+- `mcap_key` is the object key inside the `incidents` bucket: `{robot_id}/{event_ts}.mcap`, event_ts in UTC ms. The bucket name isn't part of the key.
 - `ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
 
 ## Tables
@@ -129,6 +130,7 @@ Each entry has the format: decision — choice. Why.
 - **Ingest keepalive** — 60 s (paho default), not the robots' 5 s. on_message blocks while it retries a down database, so with 5 s the broker would drop ingest about 7.5 s into an outage. The persistent session would cover it, but it adds churn.
 - **Robot state moves forward only** — robots.last_seen and last_state update only when the incoming ts is newer, so Step 6 backfill can't move a robot backwards. The WebSocket pushes only telemetry that advanced a robot's state; backfilled rows go to the database only.
 - **Bad message vs database down** — a payload that doesn't parse or validate is logged and skipped (which acks it), so it can't be redelivered forever. A database error is retried with backoff inside on_message (1 s doubling to 10 s), so nothing is acked and the broker holds everything else. on_message catches every exception, because paho 2 stops its network thread when a callback raises.
+- **Incident object key** — {robot_id}/{event_ts}.mcap in bucket incidents; the bucket name isn't repeated in the key.
 - **Presigned URLs** — signed for MINIO_PUBLIC_URL (http://localhost:9000), because a signature covers the host: a URL signed for minio:9000 doesn't work in a browser and can't be rewritten.
 
 ## Conventions
