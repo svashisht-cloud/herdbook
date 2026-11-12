@@ -104,7 +104,10 @@ class EdgeAgent(Node):
     def on_disconnect(self, client, userdata, flags, reason_code, properties):
         with self.lock:
             self.connected = False
-        self.get_logger().warning(f"MQTT disconnected: {reason_code}")
+        if reason_code.is_failure:
+            self.get_logger().warning(f"MQTT disconnected: {reason_code}")
+        else:
+            self.get_logger().info(f"MQTT disconnected: {reason_code}")
 
     # ---------- ROS thread ----------
 
