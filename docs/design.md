@@ -37,7 +37,8 @@ flowchart LR
 Telemetry and events reach the cloud through one path: the edge agent over MQTT.
 Clips skip the broker and upload straight to object storage. The recorder hands each
 clip's metadata to the edge agent, so incident records survive outages the same way
-telemetry does. Large files never travel over MQTT.
+telemetry does. Large files never travel over MQTT. Each clip is stored in the `incidents` bucket under the key
+`{robot_id}/{event_ts}.mcap` (event_ts in UTC ms); the bucket name isn't repeated in the key.
 
 ## MQTT topics
 
@@ -53,6 +54,8 @@ JSON. Every message carries `robot_id`, `seq` (counts up per robot) and `ts` (UT
 `ts` is set when the message is created on the robot, not when it is sent, so a
 redelivered or backfilled message is identical to the original.
 
+`mcap_key` in an event is that object key, without the bucket name.
+
 `ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
 
 ## Tables
@@ -60,7 +63,7 @@ redelivered or backfilled message is identical to the original.
 | Table | Columns | Notes |
 |---|---|---|
 | `telemetry` | `robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode` | Hypertable on `ts`; unique on (`robot_id`, `seq`, `ts`) |
-| `robots` | `robot_id, last_seen, status, last_state` | Upserted on every message |
+| `robots` | `robot_id, last_seen, status, last_state` | `last_seen`/`last_state` from telemetry, forward only (newer `ts` wins); `status` from the status topic |
 | `incidents` | `id, robot_id, ts, type, mcap_key, size_bytes` | One row per clip; unique on `mcap_key` |
 
 Inserts are idempotent (`ON CONFLICT DO NOTHING`) because QoS 1 guarantees duplicates.

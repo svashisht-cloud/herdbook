@@ -1,6 +1,6 @@
 name: fleet
 
-# Step 0: infrastructure. Step 1: four simulated robots. Ingest and dashboard come in later steps.
+# Step 0: infrastructure. Step 1: four simulated robots. Step 3: ingest + API. The dashboard comes later.
 # Run from this folder:  cp .env.example .env && docker compose up -d
 # Ports bind to 127.0.0.1 so nothing is reachable from your LAN.
 
@@ -125,6 +125,35 @@ services:
       - "127.0.0.1:9001:9001"   # web console
     volumes:
       - minio-data:/data
+
+  # MQTT -> TimescaleDB, plus REST and the /ws WebSocket. Persistent MQTT session
+  # (client ID `ingest`): the broker queues its messages while it's down.
+  ingest:
+    build: ../cloud/ingest
+    image: fleet-ingest
+    environment:
+      PGHOST: timescaledb
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      # Presigned URLs are signed for the host the browser uses (decisions log).
+      MINIO_PUBLIC_URL: http://localhost:9000
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      timescaledb:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
 
   # One-shot job: wait for MinIO, create the bucket, exit 0.
   # Reuses the server image because it bundles the client (as mcli, with an mc alias).

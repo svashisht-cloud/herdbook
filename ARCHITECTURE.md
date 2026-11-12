@@ -54,15 +54,15 @@ ROS topics never leave a robot. Inside each robot:
 
 - **fake_robot** publishes at 10 Hz: `odom` (nav_msgs/Odometry), `battery` (sensor_msgs/BatteryState) and `diagnostics` (diagnostic_msgs/DiagnosticArray). Events (`event`, a JSON string in std_msgs/String such as `obstacle_stop`) are published by hand (see the decisions log). It also publishes `points` (PointCloud2, 1–2k points at 5 Hz).
 - **edge_agent** subscribes to `odom`, `battery` and `diagnostics`, downsamples to 2 Hz and publishes to MQTT. Every outgoing message goes into its SQLite queue first. A sender loop publishes in order and deletes a row only when the broker acks it. On reconnect it drains the backlog at a capped rate.
-- **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom` and `diagnostics` in a ring buffer. On an `event` it records 30 s more, writes one MCAP and uploads it to MinIO at `incidents/{robot_id}/{event_ts}.mcap`, retrying with backoff. It then hands the metadata to edge_agent. Large files never go over MQTT.
+- **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom` and `diagnostics` in a ring buffer. On an `event` it records 30 s more, writes one MCAP and uploads it to MinIO's `incidents` bucket with key `{robot_id}/{event_ts}.mcap` (event_ts in UTC ms), retrying with backoff. It then hands the metadata to edge_agent. Large files never go over MQTT.
 
-In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fleet/+/events` and writes to TimescaleDB. It serves:
+In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fleet/+/events` at QoS 1 and writes to TimescaleDB, committing each message before it's acked. Malformed messages are logged and skipped. It serves on 127.0.0.1:8000 (all timestamps as UTC ms):
 
 - `GET /robots`
-- `GET /robots/{id}/telemetry?since=`
+- `GET /robots/{id}/telemetry?since=` (default: the last 10 minutes)
 - `GET /incidents`
-- `GET /incidents/{id}/download` (a presigned MinIO URL)
-- a `/ws` WebSocket that pushes new telemetry rows and status changes
+- `GET /incidents/{id}/download` (`{"url": ...}`, a 15-minute presigned MinIO URL signed for `MINIO_PUBLIC_URL`)
+- a `/ws` WebSocket that pushes `{"type":"telemetry",...}` for telemetry that advanced a robot's state (not backfill) and `{"type":"status","robot_id","status"}`. A slow or dead client is dropped without delaying the others
 
 ## MQTT contract
 
@@ -75,6 +75,7 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 - `ts` is UTC milliseconds. `seq` counts up per robot.
 - The Last Will sets status to `offline` (retained). The robot publishes its current state (`online` or `degraded`, retained) on every (re)connect and whenever it changes.
 - Keepalive is 5 s.
+- `mcap_key` is the object key inside the `incidents` bucket: `{robot_id}/{event_ts}.mcap`, event_ts in UTC ms. The bucket name isn't part of the key.
 - `ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
 
 ## Tables
@@ -82,8 +83,8 @@ In the cloud, ingest subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fl
 | Table | Columns | Notes |
 |---|---|---|
 | `telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | Hypertable on `ts`; unique on (robot_id, seq, ts); inserts use `ON CONFLICT DO NOTHING` |
-| `robots` | robot_id, last_seen, status, last_state | Updated on every message; `status` is `online`, `degraded` or `offline` (default `offline`) |
-| `incidents` | id, robot_id, ts, type, mcap_key, size_bytes | One row per clip |
+| `robots` | robot_id, last_seen, status, last_state | last_seen and last_state (JSON) come from telemetry and only move forward (newer ts wins); `status` comes from the status topic: `online`, `degraded` or `offline` (default `offline`) |
+| `incidents` | id, robot_id, ts, type, mcap_key, size_bytes | One row per clip; unique on mcap_key, inserts use `ON CONFLICT DO NOTHING` |
 
 ## Decisions log
 
@@ -121,6 +122,17 @@ Each entry has the format: decision — choice. Why.
 - **Degraded status** — `fleet/{robot_id}/status` is `online`, `degraded` or `offline`, retained, QoS 1. edge_agent publishes `degraded` when any topic goes stale and `online` when all are fresh again. It publishes only when the state changes, plus its current state on every (re)connect. The Last Will stays `offline`. This separates "connected but its data is stale" from "gone" without adding nullable telemetry fields. A brief `degraded` at startup, before the first messages arrive, is expected.
 - **MQTT settings** — `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER` and `MQTT_PASSWORD` are set once in the `x-robot` env map. The credentials come from `infra/.env`, the same variables mosquitto uses. One source of truth, and nothing secret in the repo.
 - **Robot stop signal** — `stop_signal: SIGINT` in the `x-robot` template. `ros2 launch` runs as PID 1 and handles only SIGINT, and Linux drops signals that PID 1 has no handler for. With Docker's default SIGTERM, `docker compose stop` did nothing until Docker SIGKILLed the container (exit 137): no node ran its shutdown, and `offline` came from the Last Will. With SIGINT, launch forwards SIGINT to every node, edge_agent publishes `offline` itself, and the stop takes under 0.5 s.
+
+### Step 3: ingest (done)
+
+- **Ingest MQTT session** — persistent session (clean_session=False, fixed client ID `ingest`), subscribed at QoS 1. The broker queues ingest's messages while it's down (up to max_queued_messages; see the next bullet), so ingest restarts leave no gaps. Ingest doesn't rely on Mosquitto persistence. No check restarts the broker, and persistence only half-covers a restart (a crash loses everything since the last save). It stays on in mosquitto.conf for retained status.
+- **Broker queue for ingest** — max_queued_messages 100000 (the default of 1,000 is about 2 min at 8 msg/s). Covers a database outage of about 3.5 h for roughly 25 MB of broker memory; past that the broker drops messages. At scale: a durable log such as Kafka.
+- **Ingest MQTT handling** — paho on its own thread; on_message writes to the database and commits before returning. paho acks only after on_message returns, so the ack follows the commit. A crash before the commit means the broker redelivers, and dedupe absorbs any copy. New rows are handed to FastAPI's event loop thread-safely for the WebSocket, without blocking the paho thread. REST endpoints are plain `def` so blocking DB calls run in FastAPI's thread pool. At scale: manual acks, so one commit can ack a batch.
+- **Ingest keepalive** — 60 s (paho default), not the robots' 5 s. on_message blocks while it retries a down database, so with 5 s the broker would drop ingest about 7.5 s into an outage. The persistent session would cover it, but it adds churn.
+- **Robot state moves forward only** — robots.last_seen and last_state update only when the incoming ts is newer, so a message that arrives after newer data (a late redelivery, or backlog sent after live data) is stored but can't move a robot backwards. The WebSocket pushes only telemetry that advanced a robot's state; backfilled rows go to the database only.
+- **Bad message vs database down** — a payload that doesn't parse or validate is logged and skipped (which acks it), so it can't be redelivered forever. A database error is retried with backoff inside on_message (1 s doubling to 10 s), so nothing is acked and the broker holds everything else. on_message catches every exception, because paho 2 stops its network thread when a callback raises.
+- **Incident object key** — {robot_id}/{event_ts}.mcap in bucket incidents; the bucket name isn't repeated in the key.
+- **Presigned URLs** — signed for MINIO_PUBLIC_URL (http://localhost:9000), because a signature covers the host: a URL signed for minio:9000 doesn't work in a browser and can't be rewritten.
 
 ## Conventions
 
