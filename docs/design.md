@@ -60,7 +60,7 @@ redelivered or backfilled message is identical to the original.
 | Table | Columns | Notes |
 |---|---|---|
 | `telemetry` | `robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode` | Hypertable on `ts`; unique on (`robot_id`, `seq`, `ts`) |
-| `robots` | `robot_id, last_seen, status, last_state` | Upserted on every message |
+| `robots` | `robot_id, last_seen, status, last_state` | `last_seen`/`last_state` from telemetry, forward only (newer `ts` wins); `status` from the status topic |
 | `incidents` | `id, robot_id, ts, type, mcap_key, size_bytes` | One row per clip; unique on `mcap_key` |
 
 Inserts are idempotent (`ON CONFLICT DO NOTHING`) because QoS 1 guarantees duplicates.
