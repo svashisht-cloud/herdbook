@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { YARD } from '../yard'
+import { STAND_IN_YARD } from '../yard'
 import { POP_MIN, easeInOutCubic, lerpView, popScale, progress, topDownView } from './transition'
 import { mapFrame } from './yardDecor'
 
@@ -45,8 +45,8 @@ describe('lerpView', () => {
 
 describe('topDownView', () => {
   const fov = 45
-  const f = mapFrame(YARD)
-  const v = topDownView(YARD, f.aspect, fov)
+  const f = mapFrame(STAND_IN_YARD)
+  const v = topDownView(STAND_IN_YARD, f.aspect, fov)
 
   it('looks (almost) straight down at the centre of the 2D map frame', () => {
     const dx = v.position[0] - v.target[0]
@@ -63,7 +63,7 @@ describe('topDownView', () => {
     expect(halfH).toBeCloseTo((f.maxY - f.minY) / 2)
   })
   it('backs off further for a canvas narrower than the frame, so the width still fits', () => {
-    const narrow = topDownView(YARD, f.aspect / 2, fov)
+    const narrow = topDownView(STAND_IN_YARD, f.aspect / 2, fov)
     const halfW = narrow.position[1] * Math.tan((fov * Math.PI) / 360) * (f.aspect / 2)
     expect(halfW).toBeCloseTo((f.maxX - f.minX) / 2)
     expect(narrow.position[1]).toBeGreaterThan(v.position[1])

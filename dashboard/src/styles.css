@@ -176,6 +176,9 @@ main {
 .yard .floor {
   fill: var(--color-floor);
 }
+.yard .map-image {
+  image-rendering: pixelated;
+}
 .yard .grid line {
   stroke: var(--color-floor-grid);
   stroke-width: 0.15;

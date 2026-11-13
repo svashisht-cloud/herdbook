@@ -1,7 +1,19 @@
 import { Line, OrbitControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from 'react'
-import { CanvasTexture, Color, SRGBColorSpace, Vector3, type Group, type Mesh, type PerspectiveCamera } from 'three'
+import {
+  CanvasTexture,
+  Color,
+  DataTexture,
+  LinearMipmapLinearFilter,
+  NearestFilter,
+  RGBAFormat,
+  SRGBColorSpace,
+  Vector3,
+  type Group,
+  type Mesh,
+  type PerspectiveCamera,
+} from 'three'
 import { FOCUS_HEIGHT_M, homeView, stepCamera, type CameraPhase, type CameraView } from '../scene/camera'
 import { stepPose, type Pose2 } from '../scene/smoothing'
 import { rosToThree, yardPlane } from '../scene/transform'
@@ -14,7 +26,7 @@ import { statusColor } from '../status'
 import { THEME } from '../theme'
 import type { Trails } from '../useTrails'
 import type { Robot } from '../types'
-import { YARD, gridLines } from '../yard'
+import { gridLines, useYard, type YardConfig, type YardImage } from '../yard'
 import { ModelErrorBoundary } from './ModelErrorBoundary'
 import { RobotModel, preloadRobotModel } from './RobotModel'
 
@@ -26,9 +38,7 @@ const RING: [number, number] = [1.4, 1.75] // status ring inner/outer radius, me
 const HALO: [number, number] = [1.9, 2.15] // selection halo, outside the status ring (same blue as the 2D map)
 const CLICK_SLOP_PX = 5 // a pointer that moved further than this was an orbit drag, not a click
 const C = THEME.color // every scene color comes from the theme (decisions log: Theme tokens)
-const LABELS = labelLayout(YARD)
-const LABEL_H = LABELS.font / 0.5625 // sprite height so its text (36 px of 64) matches the 2D font size
-const FRAME = mapFrame(YARD) // the 2D map's frame: same aspect, so the top-down camera matches it
+const LABEL_H_PER_FONT = 1 / 0.5625 // sprite height per 2D font size: the sprite's text is 36 px of 64
 const FOV = 45
 const FADE_MS = 150 // canvas cross-fade with the 2D map at the ends of a transition
 const HIT_Y = 1 // hit sphere centre, metres above the floor
@@ -69,10 +79,13 @@ const at = (x: number, y: number, h: number): [number, number, number] => {
 }
 
 export function Yard3D({ robots, selected, onSelect, trails, transition, onTransitionEnd }: Props) {
-  const { center, size } = yardPlane(YARD)
+  const { config: yard, image } = useYard()
+  const FRAME = mapFrame(yard) // the 2D map's frame: same aspect, so the top-down camera matches it
+  const { center, size } = yardPlane(yard)
   const span = Math.max(...size)
   const home = homeView(center, span)
-  const top = topDownView(YARD, FRAME.aspect, FOV)
+  const top = topDownView(yard, FRAME.aspect, FOV)
+  const floorTexture = useFloorTexture(image)
   const poses: Poses = useRef(new Map<string, Pose2>())
   const pop: Pop = useRef(transition === 'in' ? POP_MIN : 1)
   // Hidden until the first frame on the way in, and faded out at the end on the way out.
@@ -113,7 +126,7 @@ export function Yard3D({ robots, selected, onSelect, trails, transition, onTrans
           Show all
         </button>
       )}
-      <span className="scale-chip">grid {scaleHint(YARD).label}</span>
+      <span className="scale-chip">grid {scaleHint(yard).label}</span>
       {/* near 0.5 m (not 0.1): depth precision at ~120 m keeps the grid and lines from z-fighting the floor. */}
       <Canvas camera={{ position: initial.position, fov: FOV, near: 0.5, far: 2000 }}>
         <color attach="background" args={[C.bg]} />
@@ -122,9 +135,19 @@ export function Yard3D({ robots, selected, onSelect, trails, transition, onTrans
         <mesh position={center} rotation={[-Math.PI / 2, 0, 0]} onClick={onGroundClick}>
           <planeGeometry args={size} />
           {/* polygonOffset pushes the floor back in depth so the grid and lines on it always win. */}
-          <meshBasicMaterial color={C.floor} toneMapped={false} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
+          {/* With a map, the occupancy texture is the floor (its free color equals the floor color).
+              key: switching between color and texture needs a new material (a shader change). */}
+          <meshBasicMaterial
+            key={floorTexture ? floorTexture.uuid : 'plain'}
+            color={floorTexture ? WHITE : C.floor}
+            map={floorTexture}
+            toneMapped={false}
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+          />
         </mesh>
-        <YardDecor />
+        <YardDecor yard={yard} />
         {robots.map((r) =>
           r.last_state ? <Trail key={`trail-${r.robot_id}`} robot={r} trails={trails} poses={poses} /> : null,
         )}
@@ -357,25 +380,45 @@ function Label({ text, position, height, color = C.text }: { text: string; posit
   )
 }
 
-// Grid, boundary, origin axes and metre labels, all from YARD (decisions log: Yard bounds). The grid
+// The map texture for the floor: bottom row first, which is a DataTexture's v = 0, and the rotated floor
+// plane puts v = 0 at the yard's bottom (ROS min y). Crisp up close, mipmapped at a distance.
+function useFloorTexture(image: YardImage | null): DataTexture | null {
+  const texture = useMemo(() => {
+    if (!image) return null
+    const t = new DataTexture(image.rgba, image.width, image.height, RGBAFormat)
+    t.colorSpace = SRGBColorSpace
+    t.magFilter = NearestFilter
+    t.minFilter = LinearMipmapLinearFilter
+    t.generateMipmaps = true
+    t.needsUpdate = true
+    return t
+  }, [image])
+  useEffect(() => () => texture?.dispose(), [texture])
+  return texture
+}
+
+// Grid, boundary, origin axes and metre labels, all from the yard (decisions log: Yard bounds). The grid
 // uses the same gridLines() as the 2D map, so both views draw exactly the same lines.
-function YardDecor() {
-  const { x: ox, y: oy } = YARD.origin
+function YardDecor({ yard }: { yard: YardConfig }) {
+  const { x: ox, y: oy } = yard.origin
+  const { width: W, height: H, grid } = yard
   const gridPoints = useMemo(() => {
     const pts: [number, number, number][] = []
-    for (const d of gridLines(YARD.width, YARD.grid)) pts.push(at(ox + d, oy, LIFT.grid), at(ox + d, oy + YARD.height, LIFT.grid))
-    for (const d of gridLines(YARD.height, YARD.grid)) pts.push(at(ox, oy + d, LIFT.grid), at(ox + YARD.width, oy + d, LIFT.grid))
+    for (const d of gridLines(W, grid)) pts.push(at(ox + d, oy, LIFT.grid), at(ox + d, oy + H, LIFT.grid))
+    for (const d of gridLines(H, grid)) pts.push(at(ox, oy + d, LIFT.grid), at(ox + W, oy + d, LIFT.grid))
     return pts
-  }, [ox, oy])
-  const corners = [at(ox, oy, LIFT.boundary), at(ox + YARD.width, oy, LIFT.boundary), at(ox + YARD.width, oy + YARD.height, LIFT.boundary), at(ox, oy + YARD.height, LIFT.boundary)]
-  const ax = axes(YARD)
+  }, [ox, oy, W, H, grid])
+  const corners = [at(ox, oy, LIFT.boundary), at(ox + W, oy, LIFT.boundary), at(ox + W, oy + H, LIFT.boundary), at(ox, oy + H, LIFT.boundary)]
+  const ax = axes(yard)
+  const LABELS = labelLayout(yard)
+  const LABEL_H = LABELS.font * LABEL_H_PER_FONT
   return (
     <group>
       <Line points={gridPoints} segments color={C.floorGrid} lineWidth={1} toneMapped={false} />
       <Line points={[...corners, corners[0]]} color={C.floorBoundary} lineWidth={2} toneMapped={false} />
       <Line points={ax.x.map(([x, y]) => at(x, y, LIFT.axes))} color={C.axisX} lineWidth={3} toneMapped={false} />
       <Line points={ax.y.map(([x, y]) => at(x, y, LIFT.axes))} color={C.axisY} lineWidth={3} toneMapped={false} />
-      {edgeLabels(YARD).map((l) => (
+      {edgeLabels(yard).map((l) => (
         <Label
           key={`${l.edge}${l.x},${l.y}`}
           text={l.text}

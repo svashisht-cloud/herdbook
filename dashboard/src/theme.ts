@@ -2,6 +2,8 @@
 // CSS and the SVG map read them as CSS variables (applyTheme writes them on :root at startup);
 // three.js and recharts can't read CSS, so they import THEME directly. No hex codes live anywhere else.
 
+const floor = '#1c2532'
+
 const status = {
   online: '#3fb950',
   degraded: '#d29922',
@@ -22,7 +24,11 @@ export const THEME = {
     danger: '#f85149',
     dangerSurface: '#2d1517',
     // Yard map, shared by the 2D SVG and the 3D scene.
-    floor: '#1c2532',
+    floor,
+    // Occupancy map pixels (decisions log: Map loader). Free matches the floor, so only walls stand out.
+    mapFree: floor,
+    mapOccupied: '#8b98a9',
+    mapUnknown: '#121820',
     floorGrid: '#2a3646',
     floorBoundary: '#7d8ea5',
     axisX: '#ff6b6b', // ROS convention: x red

@@ -1,6 +1,6 @@
 import { gridLines, type YardConfig } from '../yard'
 
-// What the yard map draws besides robots, all derived from YARD (decisions log: Yard bounds).
+// What the yard map draws besides robots, all derived from the YardConfig (decisions log: Yard bounds).
 // Coordinates are ROS map metres; each view maps them with its own transform.
 
 export interface EdgeLabel {

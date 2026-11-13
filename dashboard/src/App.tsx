@@ -5,6 +5,8 @@ import { RobotCharts } from './components/RobotCharts'
 import { YardMap } from './components/YardMap'
 import { useFleet } from './useFleet'
 import { useTrails } from './useTrails'
+import { STAND_IN_YARD, YardContext } from './yard'
+import { useYardMap } from './useYardMap'
 
 // three is large, so the 3D view loads only when someone switches to it.
 const Yard3D = lazy(() => import('./components/Yard3D').then((m) => ({ default: m.Yard3D })))
@@ -18,6 +20,7 @@ export function App() {
   const [view, setView] = useState<View>('2d')
   const list = Object.values(robots).sort((a, b) => a.robot_id.localeCompare(b.robot_id))
   const trails = useTrails(subscribeTelemetry, list)
+  const yard = useYardMap()
   const busy = view === 'to3d' || view === 'to2d'
   const shownAs = view === '2d' || view === 'to2d' ? '2d' : '3d'
   const pick = (v: '2d' | '3d') => {
@@ -27,6 +30,7 @@ export function App() {
   const onTransitionEnd = useCallback(() => setView((v) => (v === 'to3d' ? '3d' : v === 'to2d' ? '2d' : v)), [])
 
   return (
+    <YardContext.Provider value={yard}>
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
@@ -45,6 +49,11 @@ export function App() {
         {!connected && (
           <div className="banner" role="alert">
             Live connection lost: robot positions and status are not updating. Reconnecting…
+          </div>
+        )}
+        {yard.error && (
+          <div className="banner" role="alert">
+            Couldn't load the yard map: {yard.error} Showing the {STAND_IN_YARD.width} × {STAND_IN_YARD.height} m stand-in.
           </div>
         )}
         <div className="top">
@@ -89,5 +98,6 @@ export function App() {
         <IncidentsPanel epoch={epoch} subscribeIncident={subscribeIncident} />
       </main>
     </div>
+    </YardContext.Provider>
   )
 }

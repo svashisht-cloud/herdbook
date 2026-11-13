@@ -4,19 +4,12 @@ import { segments } from '../scene/trail'
 import { statusColor } from '../status'
 import type { Robot } from '../types'
 import type { Trails } from '../useTrails'
-import { YARD, gridLines } from '../yard'
+import { gridLines, useYard } from '../yard'
 
-// Everything here derives from YARD (decisions log). ROS y points up and SVG y points down, so y is flipped.
-const W = YARD.width
-const H = YARD.height
-const FRAME = mapFrame(YARD) // the same box the 3D canvas frames, so the two views line up
-const L = labelLayout(YARD)
-const FONT = L.font
+// Everything here derives from the yard (decisions log: Yard bounds), which comes from the loaded map.
+// ROS y points up and SVG y points down, so y is flipped.
 const GLYPH = robotGlyph()
 const HALO_R = Math.hypot(GLYPH.body.w, GLYPH.body.h) / 2 + 0.6
-
-const sx = (x: number) => x - YARD.origin.x
-const sy = (y: number) => H - (y - YARD.origin.y)
 
 interface Props {
   robots: Robot[]
@@ -26,10 +19,18 @@ interface Props {
 }
 
 export function YardMap({ robots, selected, onSelect, trails }: Props) {
-  const xs = gridLines(W, YARD.grid)
-  const ys = gridLines(H, YARD.grid)
-  const ax = axes(YARD)
-  const scale = scaleHint(YARD)
+  const { config: yard, image } = useYard()
+  const W = yard.width
+  const H = yard.height
+  const FRAME = mapFrame(yard) // the same box the 3D canvas frames, so the two views line up
+  const L = labelLayout(yard)
+  const FONT = L.font
+  const sx = (x: number) => x - yard.origin.x
+  const sy = (y: number) => H - (y - yard.origin.y)
+  const xs = gridLines(W, yard.grid)
+  const ys = gridLines(H, yard.grid)
+  const ax = axes(yard)
+  const scale = scaleHint(yard)
   const now = Date.now()
   return (
     <svg
@@ -39,6 +40,8 @@ export function YardMap({ robots, selected, onSelect, trails }: Props) {
       aria-label="Yard map"
     >
       <rect className="floor" x={0} y={0} width={W} height={H} />
+      {/* The occupancy map, top row first like the PGM: its top edge is the yard's top (max y). */}
+      {image && <image className="map-image" href={image.url} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />}
       <g className="grid">
         {xs.map((x) => (
           <line key={`x${x}`} x1={x} y1={0} x2={x} y2={H} />
@@ -55,7 +58,7 @@ export function YardMap({ robots, selected, onSelect, trails }: Props) {
       </g>
 
       <g className="edge-labels" fontSize={FONT}>
-        {edgeLabels(YARD).map((l) =>
+        {edgeLabels(yard).map((l) =>
           l.edge === 'bottom' ? (
             <text key={`b${l.x}`} x={sx(l.x)} y={H + L.bottomBaseline} textAnchor="middle">
               {l.text}

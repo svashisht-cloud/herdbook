@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { YARD } from '../yard'
+import { STAND_IN_YARD } from '../yard'
 import { rosToThree, yardPlane } from './transform'
 
 describe('rosToThree', () => {
@@ -28,7 +28,7 @@ describe('rosToThree', () => {
 
 describe('yardPlane', () => {
   it('centres the default yard at (50, 0, -30) with size 100 x 60', () => {
-    expect(yardPlane(YARD)).toEqual({ center: [50, 0, -30], size: [100, 60] })
+    expect(yardPlane(STAND_IN_YARD)).toEqual({ center: [50, 0, -30], size: [100, 60] })
   })
   it('follows the origin', () => {
     const p = yardPlane({ width: 20, height: 10, origin: { x: -5, y: 3 }, grid: 5 })
