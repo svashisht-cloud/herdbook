@@ -53,7 +53,7 @@ docs/           design.md, architecture diagram
 ROS topics never leave a robot. Inside each robot:
 
 - **fake_robot** publishes at 10 Hz: `odom` (nav_msgs/Odometry), `battery` (sensor_msgs/BatteryState) and `diagnostics` (diagnostic_msgs/DiagnosticArray). Events (`event`, a JSON string in std_msgs/String such as `obstacle_stop`) are published by hand (see the decisions log). It also publishes `points` (PointCloud2, 1–2k points at 5 Hz).
-- **edge_agent** subscribes to `odom`, `battery` and `diagnostics`, downsamples to 2 Hz and publishes to MQTT. Every outgoing message goes into its SQLite queue first. A sender loop publishes in order and deletes a row only when the broker acks it. On reconnect it drains the backlog at a capped rate.
+- **edge_agent** subscribes to `odom`, `battery` and `diagnostics`, downsamples to 2 Hz and publishes to MQTT. It also forwards each update on the `incident` topic to `fleet/{robot_id}/events`. (Step 6) Every outgoing message goes into its SQLite queue first. (Step 6) A sender loop publishes in order and deletes a row only when the broker acks it. (Step 6) On reconnect it drains the backlog at a capped rate. Until Step 6, paho holds unsent QoS 1 messages in memory (see Known limitations).
 - **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom`, `diagnostics` and `event` in a ring buffer. On an `event` it publishes a `recording` update on the ROS topic `incident` right away, records 30 s more, writes one MCAP to `/data/clips` and uploads it to MinIO's `incidents` bucket with key `{robot_id}/{event_ts}.mcap` (event_ts in UTC ms, of the clip's first event), retrying with backoff. After the upload it publishes `ready` on `incident` for every event in the clip. edge_agent forwards each `incident` update to `fleet/{robot_id}/events`. Large files never go over MQTT.
 
 In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fleet/+/events` at QoS 1 and writes to TimescaleDB, committing each message before it's acked. Malformed messages are logged and skipped. It serves on 127.0.0.1:8000 (all timestamps as UTC ms):
@@ -62,7 +62,7 @@ In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fle
 - `GET /robots/{id}/telemetry?since=` (default: the last 10 minutes)
 - `GET /incidents?since=` (default: the last 24 h)
 - `GET /incidents/{id}/download` (`{"url": ...}`, a 15-minute presigned MinIO URL signed for `MINIO_PUBLIC_URL`; 404 unless the incident is `ready`)
-- a `/ws` WebSocket that pushes `{"type":"telemetry",...}` for telemetry that advanced a robot's state (not backfill) `{"type":"status","robot_id","status"}` and `{"type":"incident","incident":{...}}` (the incident row, nested because it has its own `type`; pushed on insert and on the change to `ready`). A slow or dead client is dropped without delaying the others
+- a `/ws` WebSocket that pushes `{"type":"telemetry",...}` for telemetry that advanced a robot's state (not backfill), `{"type":"status","robot_id","status"}`, and `{"type":"incident","incident":{...}}` (the incident row, nested because it has its own `type`; pushed on insert and on the change to `ready`). A slow or dead client is dropped without delaying the others
 
 ## MQTT contract
 
@@ -140,7 +140,7 @@ Each entry has the format: decision — choice. Why.
 - **Map coordinates** — ROS y points up and SVG y points down, so the map flips y. The yard has fixed bounds of 0–100 × 0–60 m.
 - **Robot color comes from status only** — offline is grey and degraded is amber; the dashboard never guesses. A banner shows while the dashboard's own WebSocket is down, because otherwise every robot would freeze while still looking online.
 - **WebSocket reconnect** — reconnect with backoff (1 s doubling to 10 s) and reload GET /robots on every (re)connect, because a WebSocket doesn't replay what was missed.
-- **Reload everything on reconnect** — after a WebSocket reconnect, the open chart refetches its 10 minutes too (and so will the incidents list), not just the robot list.
+- **Reload everything on reconnect** — after a WebSocket reconnect, the open chart refetches its 10 minutes and the incidents list refetches its 24 h too, not just the robot list.
 
 ### Step 5: event clips (done)
 
@@ -158,6 +158,13 @@ Each entry has the format: decision — choice. Why.
 - **Floor realism (after Steps 5–6, before the Step 7 recording)** — a generic warehouse floor: the dashboard draws aisles, pick stations and a charging area, and fake_robot follows aisle routes with stops, so mode switches between driving and picking. It also adds richer on-robot topics (tf, IMU, several diagnostic components with occasional WARN). It's generic on purpose so it doesn't resemble any employer's product. "Yard" is renamed to "floor" throughout.
 - **Reference write-up and failure tests (Step 7)** — the README becomes a write-up of the trade-offs and failure behavior, plus a script anyone can run that cuts a robot's network, restarts the broker, takes the database down, and prints a per-robot gap report.
 - **Drop-in kit (possible Step 9)** — a config-driven edge_agent (topics, rates, fields, clip triggers), proven by replaying a public real-robot recording. Build only if founder conversations show demand.
+
+## Known limitations
+
+- **Shared robot upload key** — robots share one put-only MinIO key on the whole incidents bucket, so a compromised robot can overwrite another robot's clip. Fix: per-robot users with a prefix-scoped policy (out of scope).
+- **Lost clips stay `recording`** — a lost clip (writer failure, or a partial clip deleted on restart) leaves its incident at `recording` permanently. There's no `failed` status, because upload retries are unbounded, so lost and slow look the same.
+- **Offline buffer is in memory until Step 6** — while MQTT is down, paho keeps edge_agent's unsent QoS 1 messages (telemetry, status and incident updates) in memory, with no size limit, and sends them on reconnect; a 3.5 min network cut lost nothing. They're lost if edge_agent restarts or the robot container stops before the reconnect.
+- **No migrations** — init.sql runs only on the first DB init. A schema change needs `docker volume rm fleet_pgdata` (and loses the data).
 
 ## Conventions
 
