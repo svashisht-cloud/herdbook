@@ -35,7 +35,7 @@ Gazebo or Nav2, auth and multi-tenancy, Kubernetes, alerting, a C++ recorder. No
 | Object storage | MinIO, S3 API via boto3 |
 | Ingest + API | One FastAPI service: MQTT subscriber, REST, WebSocket |
 | Telemetry DB | Postgres + TimescaleDB |
-| Dashboard | React + Vite, 2D SVG map, plain WebSocket |
+| Dashboard | React + Vite, 2D SVG map + 3D view (three, @react-three/fiber, @react-three/drei), plain WebSocket |
 | Packaging | One `infra/docker-compose.yml` |
 
 ## Repo layout
@@ -138,7 +138,7 @@ Each entry has the format: decision — choice. Why.
 ### Step 4: dashboard (done)
 
 - **Dashboard serving** — an nginx container serves the built app and proxies /api and /ws to ingest. That gives one `docker compose up` for the whole demo and one origin (no CORS), and it's the shape Step 8 deploys. Day-to-day UI work can use Vite's dev server with the same proxy paths.
-- **Map coordinates** — ROS y points up and SVG y points down, so the map flips y. The yard has fixed bounds of 0–100 × 0–60 m.
+- **Map coordinates** — ROS y points up and SVG y points down, so the map flips y. The yard bounds (default 0–100 × 0–60 m) come from the one config object in `dashboard/src/yard.ts` (see Dashboard 3D view).
 - **Robot color comes from status only** — offline is grey and degraded is amber; the dashboard never guesses. A banner shows while the dashboard's own WebSocket is down, because otherwise every robot would freeze while still looking online.
 - **WebSocket reconnect** — reconnect with backoff (1 s doubling to 10 s) and reload GET /robots on every (re)connect, because a WebSocket doesn't replay what was missed.
 - **Reload everything on reconnect** — after a WebSocket reconnect, the open chart refetches its 10 minutes and the incidents list refetches its 24 h too, not just the robot list.
@@ -183,6 +183,17 @@ Each entry has the format: decision — choice. Why.
 - **queue.db and clips share `/data`** — the outbox and the clips waiting for upload sit on the same per-robot volume, with no disk quota between them. A long outage plus many events could fill the disk for both.
 - **`ros2 topic pub` hangs without a network** — in a container with no network, `ros2 topic pub` hangs, so failure scripts stop the broker instead of cutting the robot's network, and wrap pubs in `timeout 5`.
 - **No migrations** — init.sql runs only on the first DB init. A schema change needs `docker volume rm fleet_pgdata` (and loses the data).
+
+### Dashboard 3D view
+
+- **3D view libraries** — three, @react-three/fiber and @react-three/drei, behind a 2D/3D toggle; the 2D SVG map stays the default. The 3D view is lazy-loaded, so three and the model (~270 kB gzipped, plus the GLB) load only when someone switches to 3D.
+- **Yard bounds** — one config object, `YARD` in `dashboard/src/yard.ts` (100 × 60 m, origin 0,0, 10 m grid), read by both the 2D map and the 3D view. Nothing else hardcodes bounds, so a different floor is a one-file change.
+- **ROS → three.js transform** — (x, y, heading) → (x, 0, −y) with yaw = heading about +Y, in `dashboard/src/scene/transform.ts`. three is y-up; mapping ROS +y to −z keeps the scene right-handed, so a CCW ROS yaw is a plain +Y rotation.
+- **3D pose smoothing** — each frame eases toward the latest pose (exponential, τ = 0.25 s, yaw the short way round), in `useFrame` via refs, not React state, and snaps on the first pose or a jump over 10 m. Telemetry is 2 Hz, so without smoothing the boxes would jump; refs keep 60 fps updates out of React renders.
+- **Status color** — both views call `statusColor()` in `dashboard/src/status.ts`, so 2D and 3D can't disagree. The 3D view shows it as a ring on the ground under each robot, so the model's own materials are never replaced. The WebSocket-down banner sits outside the map slot and shows in both views.
+- **Robot model** — `dashboard/public/models/robot1.glb` (CC0 rover, 353 KB, 8,032 triangles), loaded once with drei `useGLTF` (Draco off, so no decoder is fetched from a CDN) and cloned per robot with its own geometry and materials (`SkeletonUtils.clone` if skinned), which are disposed on unmount. It's auto-fitted to a 2 m footprint, then `ModelConfig` {url, scale, yawOffset, groundOffset} in `dashboard/src/scene/robotModel.ts` applies; robot1 needs yawOffset π/2 because it faces +Z (the glTF convention). While loading or if loading fails, the old box body is shown, and a failure logs one console error. Models arrive in unknown units and orientations, so the viewer only takes a config, which is the same shape uploaded models will use.
+- **3D follow camera** — clicking a robot (or picking it in the fleet list) eases the camera to 14 m from it, keeping the current viewing angle, then follows: the orbit target tracks the robot and the camera moves with it, so the user can still orbit and zoom. Clicking empty ground, pressing Esc or the "Show all" button eases back to the whole-yard view and hands the camera back. Selection is the one `selected` state the 2D map and fleet list already use, so a 3D click also opens that robot's charts, with a blue halo like the 2D map's. A pointer that moved more than 5 px is an orbit drag, not a click. The logic is pure (`dashboard/src/scene/camera.ts`, tested); the R3F layer reads the live camera each frame and writes the result back. A robot at 2 Hz drives out of frame within seconds, so a one-off zoom would lose it.
+- **Dashboard unit tests** — Vitest (`npm test`) for the plain TS modules (transform, smoothing, color, model fit and config, follow camera). It reuses Vite's config, and the R3F layer stays thin enough not to need tests.
 
 ## Conventions
 

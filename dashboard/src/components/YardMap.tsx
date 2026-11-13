@@ -1,10 +1,10 @@
-import { STATUS_COLOR } from '../status'
+import { statusColor } from '../status'
 import type { Robot } from '../types'
+import { YARD, gridLines } from '../yard'
 
-// Fixed yard bounds in metres (decisions log). ROS y points up, SVG y points down, so y is flipped.
-const W = 100
-const H = 60
-const GRID = 10
+// Yard bounds come from YARD (decisions log). ROS y points up, SVG y points down, so y is flipped.
+const W = YARD.width
+const H = YARD.height
 const DOT_R = 1.6
 const HEADING_LEN = 3.6
 
@@ -15,8 +15,8 @@ interface Props {
 }
 
 export function YardMap({ robots, selected, onSelect }: Props) {
-  const xs = Array.from({ length: W / GRID + 1 }, (_, i) => i * GRID)
-  const ys = Array.from({ length: H / GRID + 1 }, (_, i) => i * GRID)
+  const xs = gridLines(W, YARD.grid)
+  const ys = gridLines(H, YARD.grid)
   return (
     <svg className="yard" viewBox={`-2 -2 ${W + 4} ${H + 4}`} role="img" aria-label="Yard map">
       <g className="grid">
@@ -33,12 +33,12 @@ export function YardMap({ robots, selected, onSelect }: Props) {
         if (!s) return null
         const hx = Math.cos(s.heading) * HEADING_LEN
         const hy = -Math.sin(s.heading) * HEADING_LEN
-        const color = STATUS_COLOR[r.status]
+        const color = statusColor(r.status)
         return (
           <g
             key={r.robot_id}
             className="robot"
-            transform={`translate(${s.x} ${H - s.y})`}
+            transform={`translate(${s.x - YARD.origin.x} ${H - (s.y - YARD.origin.y)})`}
             onClick={() => onSelect(r.robot_id)}
           >
             {r.robot_id === selected && <circle r={DOT_R + 1} className="halo" />}

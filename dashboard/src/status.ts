@@ -6,3 +6,8 @@ export const STATUS_COLOR: Record<Status, string> = {
   degraded: '#e0a000',
   offline: '#9aa0a6',
 }
+
+/** Both views use this: offline grey, degraded amber, online green. */
+export function statusColor(status: Status): string {
+  return STATUS_COLOR[status]
+}

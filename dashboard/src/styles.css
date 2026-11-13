@@ -90,6 +90,7 @@ main {
 }
 
 .yard,
+.yard3d,
 .fleet,
 .charts,
 .incidents {
@@ -102,6 +103,54 @@ main {
   width: 100%;
   display: block;
 }
+.yard3d {
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+.yard3d .show-all {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2328;
+  cursor: pointer;
+}
+.yard3d.loading {
+  display: grid;
+  place-items: center;
+}
+
+.view-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.view-toggle button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 0;
+  background: #fff;
+  color: #57606a;
+  cursor: pointer;
+}
+.view-toggle button + button {
+  border-left: 1px solid #d0d7de;
+}
+.view-toggle button[aria-pressed='true'] {
+  background: #1f2328;
+  color: #fff;
+}
+
 .yard .grid line {
   stroke: #eef0f2;
   stroke-width: 0.15;
