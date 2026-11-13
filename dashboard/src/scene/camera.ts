@@ -34,9 +34,13 @@ const mul = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k]
 const len = (a: Vec3) => Math.hypot(a[0], a[1], a[2])
 const lerp = (a: Vec3, b: Vec3, k: number): Vec3 => add(a, mul(sub(b, a), k))
 
-/** The whole-yard view: above and south of the yard centre, looking at it. */
+/**
+ * The whole-yard view: above and south of the yard, looking at a point a little south of its centre
+ * so the near edge and its metre labels stay in frame.
+ */
 export function homeView(center: Vec3, span: number): CameraView {
-  return { position: [center[0], span * 0.55, center[2] + span * 0.5], target: center }
+  const target: Vec3 = [center[0], 0, center[2] + span * 0.06]
+  return { position: [target[0], span * 0.82, target[2] + span * 0.78], target }
 }
 
 /** A close view of `focus` from the same direction the camera looks now. */

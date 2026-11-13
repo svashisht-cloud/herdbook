@@ -1,4 +1,5 @@
-import { STATUS_COLOR } from '../status'
+import { statusColor } from '../status'
+import type { Status } from '../types'
 import type { Robot } from '../types'
 import { useNow } from '../useNow'
 
@@ -17,7 +18,23 @@ interface Props {
 
 export function FleetList({ robots, selected, onSelect }: Props) {
   const now = useNow()
+  const counts = robots.reduce<Record<Status, number>>(
+    (acc, r) => ({ ...acc, [r.status]: acc[r.status] + 1 }),
+    { online: 0, degraded: 0, offline: 0 },
+  )
   return (
+    <section className="panel fleet-panel">
+      <div className="panel-head">
+        <h2>Robots</h2>
+        <div className="counts">
+          {(['online', 'degraded', 'offline'] as const).map((st) => (
+            <span key={st} className="status">
+              <i className="dot" style={{ background: statusColor(st) }} />
+              {counts[st]} {st}
+            </span>
+          ))}
+        </div>
+      </div>
     <table className="fleet">
       <thead>
         <tr>
@@ -39,7 +56,8 @@ export function FleetList({ robots, selected, onSelect }: Props) {
             >
               <td>{r.robot_id}</td>
               <td>
-                <span className="badge" style={{ background: STATUS_COLOR[r.status] }}>
+                <span className="status">
+                  <i className="dot" style={{ background: statusColor(r.status) }} />
                   {r.status}
                 </span>
               </td>
@@ -51,5 +69,6 @@ export function FleetList({ robots, selected, onSelect }: Props) {
         })}
       </tbody>
     </table>
+    </section>
   )
 }

@@ -10,10 +10,12 @@ const run = (s: CameraState, focus: Vec3 | null, frames: number) => {
 }
 
 describe('homeView', () => {
-  it('looks at the yard centre from above and south of it', () => {
-    expect(home.target).toEqual([50, 0, -30])
+  it('looks at the yard from above and south of it, aimed a little south of centre', () => {
+    expect(home.target[0]).toBe(50)
+    expect(home.target[2]).toBeGreaterThan(-30) // south of centre (three +z is ROS -y)
+    expect(home.target[2]).toBeLessThan(0) // but still inside the yard
     expect(home.position[1]).toBeGreaterThan(0)
-    expect(home.position[2]).toBeGreaterThan(-30)
+    expect(home.position[2]).toBeGreaterThan(home.target[2])
   })
 })
 

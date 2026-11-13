@@ -66,7 +66,7 @@ export function IncidentsPanel({ epoch, subscribeIncident }: Props) {
     .sort((a, b) => b.event_ts - a.event_ts || b.id - a.id)
 
   return (
-    <section className="incidents">
+    <section className="panel incidents">
       <h2>
         Incidents <span className="muted">last 24 hours · {rows.length}</span>
       </h2>
@@ -92,7 +92,10 @@ export function IncidentsPanel({ epoch, subscribeIncident }: Props) {
                 <td>{i.type}</td>
                 <td>{fmtTime(i.event_ts)}</td>
                 <td>
-                  <span className={`badge ${i.status}`}>{i.status}</span>
+                  <span className="status">
+                    <i className={`dot ${i.status}`} />
+                    {i.status}
+                  </span>
                 </td>
                 <td className="num">{fmtSize(i.size_bytes)}</td>
                 <td>{i.status === 'ready' && <button onClick={() => void download(i.id)}>Download</button>}</td>
