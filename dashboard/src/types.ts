@@ -22,6 +22,19 @@ export interface Robot {
   last_state: Telemetry | null
 }
 
+export type IncidentStatus = 'recording' | 'ready'
+
+export interface Incident {
+  id: number
+  robot_id: string
+  event_ts: number
+  type: string
+  status: IncidentStatus
+  mcap_key: string | null // null until ready
+  size_bytes: number | null // null until ready
+}
+
 export type WsMessage =
   | ({ type: 'telemetry' } & Telemetry)
   | { type: 'status'; robot_id: string; status: Status }
+  | { type: 'incident'; incident: Incident } // nested: an incident has its own `type`

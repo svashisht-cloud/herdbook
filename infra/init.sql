@@ -32,14 +32,17 @@ CREATE TABLE IF NOT EXISTS robots (
     last_state JSONB
 );
 
--- One row per MCAP clip. mcap_key is unique per clip, so it is the dedupe key
--- for redelivered event messages.
+-- One row per event (incident). It's inserted as 'recording' when the event
+-- happens and updated to 'ready' once its clip is uploaded; status never moves
+-- back. Overlapping events share one clip, so mcap_key is not unique.
 CREATE TABLE IF NOT EXISTS incidents (
     id         BIGSERIAL PRIMARY KEY,
     robot_id   TEXT        NOT NULL,
-    ts         TIMESTAMPTZ NOT NULL,
+    event_ts   TIMESTAMPTZ NOT NULL,
     type       TEXT        NOT NULL,
-    mcap_key   TEXT        NOT NULL UNIQUE,
-    size_bytes BIGINT
+    status     TEXT        NOT NULL CHECK (status IN ('recording', 'ready')),
+    mcap_key   TEXT,
+    size_bytes BIGINT,
+    CONSTRAINT incidents_event UNIQUE (robot_id, event_ts)
 );
-CREATE INDEX IF NOT EXISTS incidents_ts ON incidents (ts DESC);
+CREATE INDEX IF NOT EXISTS incidents_event_ts ON incidents (event_ts DESC);

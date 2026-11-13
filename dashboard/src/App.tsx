@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { FleetList } from './components/FleetList'
+import { IncidentsPanel } from './components/IncidentsPanel'
 import { RobotCharts } from './components/RobotCharts'
 import { YardMap } from './components/YardMap'
 import { useFleet } from './useFleet'
 
 export function App() {
-  const { robots, connected, subscribeTelemetry } = useFleet()
+  const { robots, connected, epoch, subscribeTelemetry, subscribeIncident } = useFleet()
   const [selected, setSelected] = useState<string | null>(null)
   const list = Object.values(robots).sort((a, b) => a.robot_id.localeCompare(b.robot_id))
 
@@ -27,10 +28,11 @@ export function App() {
           <FleetList robots={list} selected={selected} onSelect={setSelected} />
         </div>
         {selected ? (
-          <RobotCharts robotId={selected} subscribeTelemetry={subscribeTelemetry} />
+          <RobotCharts robotId={selected} epoch={epoch} subscribeTelemetry={subscribeTelemetry} />
         ) : (
           <p className="muted hint">Click a robot on the map or in the list to see its speed and battery.</p>
         )}
+        <IncidentsPanel epoch={epoch} subscribeIncident={subscribeIncident} />
       </main>
     </div>
   )

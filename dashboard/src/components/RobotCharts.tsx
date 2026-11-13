@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { Telemetry } from '../types'
 
@@ -16,18 +16,24 @@ const timeFmt = (ts: number) => new Date(ts).toLocaleTimeString()
 
 interface Props {
   robotId: string
+  epoch: number // goes up on every WebSocket (re)connect: refetch then
   subscribeTelemetry: (fn: (t: Telemetry) => void) => () => void
 }
 
-export function RobotCharts({ robotId, subscribeTelemetry }: Props) {
+export function RobotCharts({ robotId, epoch, subscribeTelemetry }: Props) {
   const [rows, setRows] = useState<Telemetry[]>([])
   const [error, setError] = useState<string | null>(null)
+  const shownRobot = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     let loaded = false
     const buffered: Telemetry[] = []
-    setRows([])
+    // A new robot starts empty. After a reconnect, keep what's shown and merge the
+    // refetched 10 minutes in: tidy() dedupes by (boot_id, seq).
+    const sameRobot = shownRobot.current === robotId
+    shownRobot.current = robotId
+    if (!sameRobot) setRows([])
     setError(null)
 
     // Live rows that arrive before the history loads are buffered, then merged in.
@@ -45,12 +51,12 @@ export function RobotCharts({ robotId, subscribeTelemetry }: Props) {
       .then((history) => {
         if (cancelled) return
         loaded = true
-        setRows(tidy([...history, ...buffered]))
+        setRows((prev) => tidy([...(sameRobot ? prev : []), ...history, ...buffered]))
       })
       .catch((err) => {
         if (cancelled) return
         loaded = true
-        setRows(tidy(buffered))
+        setRows((prev) => tidy([...(sameRobot ? prev : []), ...buffered]))
         setError(`Couldn't load history: ${err.message}`)
       })
 
@@ -58,7 +64,7 @@ export function RobotCharts({ robotId, subscribeTelemetry }: Props) {
       cancelled = true
       unsubscribe()
     }
-  }, [robotId, subscribeTelemetry])
+  }, [robotId, epoch, subscribeTelemetry])
 
   const data = rows.map((r) => ({
     ts: r.ts,

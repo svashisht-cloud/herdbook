@@ -31,6 +31,7 @@ DSN = make_conninfo(
 )
 BUCKET = os.environ["MINIO_BUCKET"]
 DEFAULT_WINDOW_MS = 10 * 60 * 1000
+INCIDENT_WINDOW_MS = 24 * 60 * 60 * 1000
 PRESIGN_EXPIRES_S = 15 * 60
 CLIENT_QUEUE_SIZE = 100
 
@@ -128,20 +129,25 @@ def robot_telemetry(robot_id: str, since: int | None = None):
 
 
 @app.get("/incidents")
-def list_incidents():
+def list_incidents(since: int | None = None):
+    if since is None:
+        since = int(time.time() * 1000) - INCIDENT_WINDOW_MS
     with pool.connection() as conn:
         return conn.execute(
-            f"SELECT id, robot_id, {MS.format(col='ts')} AS ts, type, mcap_key, size_bytes "
-            "FROM incidents ORDER BY ts DESC, id DESC"
+            f"SELECT id, robot_id, {MS.format(col='event_ts')} AS event_ts, type, status, mcap_key, size_bytes "
+            f"FROM incidents WHERE event_ts >= {TS} ORDER BY event_ts DESC, id DESC",
+            (since,),
         ).fetchall()
 
 
 @app.get("/incidents/{incident_id}/download")
 def download_incident(incident_id: int):
     with pool.connection() as conn:
-        row = conn.execute("SELECT mcap_key FROM incidents WHERE id = %s", (incident_id,)).fetchone()
+        row = conn.execute(
+            "SELECT mcap_key FROM incidents WHERE id = %s AND status = 'ready'", (incident_id,)
+        ).fetchone()
     if row is None:
-        raise HTTPException(status_code=404, detail="incident not found")
+        raise HTTPException(status_code=404, detail="incident not found or its clip isn't ready")
     url = s3_public.generate_presigned_url(
         "get_object", Params={"Bucket": BUCKET, "Key": row["mcap_key"]}, ExpiresIn=PRESIGN_EXPIRES_S
     )
