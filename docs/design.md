@@ -36,7 +36,7 @@ flowchart LR
 
 Telemetry and events reach the cloud through one path: the edge agent over MQTT.
 Clips skip the broker and upload straight to object storage. The recorder hands each
-clip's metadata to the edge agent, so incident records survive outages the same way
+incident update (`recording`, then `ready` after the upload) to the edge agent, so incident records survive outages the same way
 telemetry does. Large files never travel over MQTT. Each clip is stored in the `incidents` bucket under the key
 `{robot_id}/{event_ts}.mcap` (event_ts in UTC ms); the bucket name isn't repeated in the key.
 
@@ -46,15 +46,15 @@ telemetry does. Large files never travel over MQTT. Each clip is stored in the `
 |---|---|---|
 | `fleet/{robot_id}/telemetry` | `robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode` | 1, no |
 | `fleet/{robot_id}/status` | `online`, `degraded` or `offline` (the Last Will) | 1, yes |
-| `fleet/{robot_id}/events` | `robot_id, seq, ts, type, mcap_key, size_bytes` | 1, no |
+| `fleet/{robot_id}/events` | `robot_id, seq, event_ts, type, status, mcap_key, size_bytes` | 1, no |
 
 ## Message schema
 
-JSON. Every message carries `robot_id`, `seq` (counts up per robot) and `ts` (UTC milliseconds).
+JSON. Every message carries `robot_id`, `seq` (counts up per robot) and a UTC-millisecond time: `ts` for telemetry, `event_ts` for events.
 `ts` is set when the message is created on the robot, not when it is sent, so a
 redelivered or backfilled message is identical to the original.
 
-`mcap_key` in an event is that object key, without the bucket name.
+An event message is an incident update: `status` is `recording` as soon as the event happens, then `ready` once its clip is uploaded. `mcap_key` (that object key, without the bucket name) and `size_bytes` are null until `ready`. Overlapping events share one clip but each is its own incident.
 
 `ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
 
@@ -64,8 +64,8 @@ redelivered or backfilled message is identical to the original.
 |---|---|---|
 | `telemetry` | `robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode` | Hypertable on `ts`; unique on (`robot_id`, `seq`, `ts`) |
 | `robots` | `robot_id, last_seen, status, last_state` | `last_seen`/`last_state` from telemetry, forward only (newer `ts` wins); `status` from the status topic |
-| `incidents` | `id, robot_id, ts, type, mcap_key, size_bytes` | One row per clip; unique on `mcap_key` |
+| `incidents` | `id, robot_id, event_ts, type, status, mcap_key, size_bytes` | One row per event; unique on (`robot_id`, `event_ts`); status moves forward only (`recording` -> `ready`) |
 
-Inserts are idempotent (`ON CONFLICT DO NOTHING`) because QoS 1 guarantees duplicates.
+Inserts are idempotent (`ON CONFLICT DO NOTHING`, or a forward-only upsert for incidents) because QoS 1 guarantees duplicates.
 TimescaleDB requires unique keys on a hypertable to include the time column, hence
 `ts` in the telemetry key.

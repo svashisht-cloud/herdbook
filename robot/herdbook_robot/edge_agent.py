@@ -2,7 +2,8 @@
 
 Every 0.5 s it builds one telemetry message from the newest odom, battery and
 diagnostics and publishes it to fleet/{robot_id}/telemetry at QoS 1. It keeps
-fleet/{robot_id}/status at online, degraded or offline (retained).
+fleet/{robot_id}/status at online, degraded or offline (retained). Each incident
+update from event_recorder (ROS topic `incident`) goes to fleet/{robot_id}/events.
 
 Threads: ROS callbacks and the 2 Hz timer run on the ROS thread. paho runs its
 network loop, on_connect and on_disconnect on its own thread. Only `state`,
@@ -19,14 +20,20 @@ import paho.mqtt.client as mqtt
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 from diagnostic_msgs.msg import DiagnosticArray
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import BatteryState
+from std_msgs.msg import String
 
 TOPICS = ("odom", "battery", "diagnostics")
 FRESHNESS_S = 1.0          # a topic older than this counts as stale
 TELEMETRY_PERIOD_S = 0.5   # 2 Hz
+# Matches event_recorder's publisher: a restarted edge_agent gets recent updates again.
+INCIDENT_QOS = QoSProfile(
+    depth=10, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL
+)
 MODE = "driving"           # always driving: the motion is a fixed loop with no stops (decisions log)
 
 
@@ -43,9 +50,11 @@ class EdgeAgent(Node):
 
         self.boot_id = int(time.time() * 1000)   # UTC ms at start: a new value means a restart
         self.seq = 0                              # ROS thread only
+        self.event_seq = 0                        # own counter: events never leave holes in telemetry's seq
 
         self.status_topic = f"fleet/{self.robot_id}/status"
         self.telemetry_topic = f"fleet/{self.robot_id}/telemetry"
+        self.events_topic = f"fleet/{self.robot_id}/events"
 
         # Shared between the ROS thread and paho's thread: always use the lock.
         self.lock = threading.Lock()
@@ -75,6 +84,8 @@ class EdgeAgent(Node):
         self.create_subscription(
             DiagnosticArray, "diagnostics", lambda m: self.update_latest("diagnostics", m), 10
         )
+
+        self.create_subscription(String, "incident", self.forward_incident, INCIDENT_QOS)
 
         # 4. Telemetry at 2 Hz
         self.timer = self.create_timer(TELEMETRY_PERIOD_S, self.publish_telemetry)
@@ -171,11 +182,33 @@ class EdgeAgent(Node):
         return message
 
     def send_telemetry(self, message):
-        info = self.mqtt.publish(self.telemetry_topic, json.dumps(message), qos=1)
+        self.send(self.telemetry_topic, message)
+
+    def forward_incident(self, msg):
+        """Incident updates go out whatever the robot's state: degraded doesn't block them."""
+        try:
+            update = json.loads(msg.data)
+            message = {
+                "robot_id": self.robot_id,
+                "seq": self.event_seq,
+                "event_ts": int(update["event_ts"]),
+                "type": update["type"],
+                "status": update["status"],
+                "mcap_key": update.get("mcap_key"),
+                "size_bytes": update.get("size_bytes"),
+            }
+        except (ValueError, KeyError, TypeError) as exc:
+            self.get_logger().warning(f"Skipping bad incident update: {exc}")
+            return
+        self.event_seq += 1
+        self.send(self.events_topic, message)
+
+    def send(self, topic, message):
+        info = self.mqtt.publish(topic, json.dumps(message), qos=1)
         # NO_CONN is expected while disconnected: paho keeps QoS 1 messages in
         # memory and sends them after it reconnects. Anything else is a real failure.
         if info.rc not in (mqtt.MQTT_ERR_SUCCESS, mqtt.MQTT_ERR_NO_CONN):
-            self.get_logger().warning(f"Telemetry publish failed: {mqtt.error_string(info.rc)}")
+            self.get_logger().warning(f"Publish to {topic} failed: {mqtt.error_string(info.rc)}")
 
     # ---------- shutdown (after spin has stopped) ----------
 

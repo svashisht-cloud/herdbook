@@ -1,6 +1,7 @@
 name: fleet
 
 # Step 0: infrastructure. Step 1: four simulated robots. Step 3: ingest + API. Step 4: dashboard.
+# Step 5: event clips (event_recorder -> MinIO).
 # Run from this folder:  cp .env.example .env && docker compose up -d
 # Ports bind to 127.0.0.1 so nothing is reachable from your LAN.
 
@@ -22,6 +23,11 @@ x-robot: &robot
     MQTT_PORT: "1883"
     MQTT_USER: ${MQTT_USER}
     MQTT_PASSWORD: ${MQTT_PASSWORD}
+    # Clip uploads for event_recorder: a PutObject-only user made by minio-init, never root keys.
+    MINIO_ENDPOINT: http://minio:9000
+    MINIO_BUCKET: ${MINIO_BUCKET}
+    MINIO_ROBOT_USER: ${MINIO_ROBOT_USER}
+    MINIO_ROBOT_PASSWORD: ${MINIO_ROBOT_PASSWORD}
   # Lists don't merge either: each robot lists *robot-src next to its own /data volume.
   volumes:
     - &robot-src ../robot:/ws/src/herdbook_robot:ro
@@ -165,7 +171,8 @@ services:
     depends_on:
       - ingest
 
-  # One-shot job: wait for MinIO, create the bucket, exit 0.
+  # One-shot job: wait for MinIO, create the bucket and the robot upload user, exit 0.
+  # The robot user's policy allows PutObject on the bucket and nothing else.
   # Reuses the server image because it bundles the client (as mcli, with an mc alias).
   minio-init:
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
@@ -175,18 +182,25 @@ services:
       sh -c 'MC=$$(command -v mc || command -v mcli) &&
              until $$MC alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1;
              do echo "waiting for minio..."; sleep 1; done &&
-             $$MC mb --ignore-existing "local/$$MINIO_BUCKET"'
+             $$MC mb --ignore-existing "local/$$MINIO_BUCKET" &&
+             printf "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::%s/*\"]}]}" "$$MINIO_BUCKET" > /tmp/robot-put.json &&
+             $$MC admin user add local "$$MINIO_ROBOT_USER" "$$MINIO_ROBOT_PASSWORD" >/dev/null &&
+             $$MC admin policy create local robot-put /tmp/robot-put.json &&
+             { $$MC admin policy attach local robot-put --user "$$MINIO_ROBOT_USER" ||
+               $$MC admin user info local "$$MINIO_ROBOT_USER" | grep -q robot-put; }'
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_ROBOT_USER: ${MINIO_ROBOT_USER}
+      MINIO_ROBOT_PASSWORD: ${MINIO_ROBOT_PASSWORD}
     restart: "no"
 
 volumes:
   mosquitto-data:
   pgdata:
   minio-data:
-  # Per-robot SQLite queue (Step 6). Unused until then.
+  # Per-robot /data: event clips waiting for upload (/data/clips), and the SQLite queue (Step 6).
   robot1-data:
   robot2-data:
   robot3-data:

@@ -54,15 +54,15 @@ ROS topics never leave a robot. Inside each robot:
 
 - **fake_robot** publishes at 10 Hz: `odom` (nav_msgs/Odometry), `battery` (sensor_msgs/BatteryState) and `diagnostics` (diagnostic_msgs/DiagnosticArray). Events (`event`, a JSON string in std_msgs/String such as `obstacle_stop`) are published by hand (see the decisions log). It also publishes `points` (PointCloud2, 1–2k points at 5 Hz).
 - **edge_agent** subscribes to `odom`, `battery` and `diagnostics`, downsamples to 2 Hz and publishes to MQTT. Every outgoing message goes into its SQLite queue first. A sender loop publishes in order and deletes a row only when the broker acks it. On reconnect it drains the backlog at a capped rate.
-- **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom` and `diagnostics` in a ring buffer. On an `event` it records 30 s more, writes one MCAP and uploads it to MinIO's `incidents` bucket with key `{robot_id}/{event_ts}.mcap` (event_ts in UTC ms), retrying with backoff. It then hands the metadata to edge_agent. Large files never go over MQTT.
+- **event_recorder** subscribes with `raw=True` and keeps 30 s of serialized `points`, `odom`, `diagnostics` and `event` in a ring buffer. On an `event` it publishes a `recording` update on the ROS topic `incident` right away, records 30 s more, writes one MCAP to `/data/clips` and uploads it to MinIO's `incidents` bucket with key `{robot_id}/{event_ts}.mcap` (event_ts in UTC ms, of the clip's first event), retrying with backoff. After the upload it publishes `ready` on `incident` for every event in the clip. edge_agent forwards each `incident` update to `fleet/{robot_id}/events`. Large files never go over MQTT.
 
 In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fleet/+/telemetry`, `fleet/+/status` and `fleet/+/events` at QoS 1 and writes to TimescaleDB, committing each message before it's acked. Malformed messages are logged and skipped. It serves on 127.0.0.1:8000 (all timestamps as UTC ms):
 
 - `GET /robots`
 - `GET /robots/{id}/telemetry?since=` (default: the last 10 minutes)
-- `GET /incidents`
-- `GET /incidents/{id}/download` (`{"url": ...}`, a 15-minute presigned MinIO URL signed for `MINIO_PUBLIC_URL`)
-- a `/ws` WebSocket that pushes `{"type":"telemetry",...}` for telemetry that advanced a robot's state (not backfill) and `{"type":"status","robot_id","status"}`. A slow or dead client is dropped without delaying the others
+- `GET /incidents?since=` (default: the last 24 h)
+- `GET /incidents/{id}/download` (`{"url": ...}`, a 15-minute presigned MinIO URL signed for `MINIO_PUBLIC_URL`; 404 unless the incident is `ready`)
+- a `/ws` WebSocket that pushes `{"type":"telemetry",...}` for telemetry that advanced a robot's state (not backfill) `{"type":"status","robot_id","status"}` and `{"type":"incident","incident":{...}}` (the incident row, nested because it has its own `type`; pushed on insert and on the change to `ready`). A slow or dead client is dropped without delaying the others
 
 ## MQTT contract
 
@@ -70,13 +70,13 @@ In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fle
 |---|---|---|
 | `fleet/{robot_id}/telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | 1, no |
 | `fleet/{robot_id}/status` | `online`, `degraded` or `offline` (Last Will is `offline`) | 1, yes |
-| `fleet/{robot_id}/events` | robot_id, seq, ts, type, mcap_key, size_bytes | 1, no |
+| `fleet/{robot_id}/events` | robot_id, seq, event_ts, type, status (`recording` or `ready`), mcap_key, size_bytes (both null until `ready`) | 1, no |
 
-- `ts` is UTC milliseconds. `seq` counts up per robot.
+- `ts` and `event_ts` are UTC milliseconds. `seq` counts up per robot, with a separate counter per topic.
 - The Last Will sets status to `offline` (retained). The robot publishes its current state (`online` or `degraded`, retained) on every (re)connect and whenever it changes.
 - Keepalive is 5 s.
 - `mcap_key` is the object key inside the `incidents` bucket: `{robot_id}/{event_ts}.mcap`, event_ts in UTC ms. The bucket name isn't part of the key.
-- `ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
+- `ts`, `event_ts` and `boot_id` are UTC ms integers. `battery` is a fraction from 0.0 to 1.0 (null if unknown). `mode` is always `driving`.
 
 ## Tables
 
@@ -84,7 +84,7 @@ In the cloud, ingest (client ID `ingest`, persistent session) subscribes to `fle
 |---|---|---|
 | `telemetry` | robot_id, boot_id, seq, ts, x, y, heading, speed, battery, mode | Hypertable on `ts`; unique on (robot_id, seq, ts); inserts use `ON CONFLICT DO NOTHING` |
 | `robots` | robot_id, last_seen, status, last_state | last_seen and last_state (JSON) come from telemetry and only move forward (newer ts wins); `status` comes from the status topic: `online`, `degraded` or `offline` (default `offline`) |
-| `incidents` | id, robot_id, ts, type, mcap_key, size_bytes | One row per clip; unique on mcap_key, inserts use `ON CONFLICT DO NOTHING` |
+| `incidents` | id, robot_id, event_ts, type, status, mcap_key, size_bytes | One row per event; unique on (robot_id, event_ts). status is `recording` or `ready`; mcap_key (not unique: overlapping events share a clip) and size_bytes are null until `ready`. Upserts move status forward only |
 
 ## Decisions log
 
@@ -140,6 +140,24 @@ Each entry has the format: decision — choice. Why.
 - **Map coordinates** — ROS y points up and SVG y points down, so the map flips y. The yard has fixed bounds of 0–100 × 0–60 m.
 - **Robot color comes from status only** — offline is grey and degraded is amber; the dashboard never guesses. A banner shows while the dashboard's own WebSocket is down, because otherwise every robot would freeze while still looking online.
 - **WebSocket reconnect** — reconnect with backoff (1 s doubling to 10 s) and reload GET /robots on every (re)connect, because a WebSocket doesn't replay what was missed.
+- **Reload everything on reconnect** — after a WebSocket reconnect, the open chart refetches its 10 minutes too (and so will the incidents list), not just the robot list.
+
+### Step 5: event clips (done)
+
+- **Incident first, clip later** — every event becomes an incident immediately with status `recording`. When its clip is uploaded, the same incident is updated to `ready` with mcap_key and size_bytes. An incident is identified by (robot_id, event_ts). Each event gets its own incident, even when two share a clip, and an incident stuck at `recording` reveals a lost clip.
+- **Incident status moves forward only** — ingest upserts on (robot_id, event_ts) and never moves `ready` back to `recording`, so late or redelivered messages can't undo a finished incident.
+- **Clip handoff** — event_recorder publishes incident updates on a ROS topic `incident` (std_msgs/String JSON) with reliable + transient_local QoS, depth 10. If edge_agent restarts, it receives recent updates again, and the forward-only upsert absorbs the repeats. An update is lost only if both nodes restart before the handoff. `ready` is sent only after the upload succeeds.
+- **Recorder QoS** — `points` is subscribed best-effort (sensor data QoS), matching its publisher; a reliable subscriber would get nothing.
+- **Clip durability** — clips are written to /data/clips and deleted only after a successful upload (retry with backoff, 1 s doubling to 60 s, in a background thread so buffering continues). On startup, leftover clips are uploaded and their `ready` updates published.
+- **Overlapping events** — an event during the 30 s after-window doesn't start a new clip. It gets its own incident pointing to the current clip, and the clip includes the `event` topic.
+- **Incident window** — GET /incidents takes `since` (UTC ms), defaulting to the last 24 h. The dashboard shows the last 24 h; older incidents stay in the database.
+- **Robot storage credentials** — minio-init creates a robot user whose policy allows only PutObject on the incidents bucket. Robots never hold root keys.
+
+## Planned
+
+- **Floor realism (after Steps 5–6, before the Step 7 recording)** — a generic warehouse floor: the dashboard draws aisles, pick stations and a charging area, and fake_robot follows aisle routes with stops, so mode switches between driving and picking. It also adds richer on-robot topics (tf, IMU, several diagnostic components with occasional WARN). It's generic on purpose so it doesn't resemble any employer's product. "Yard" is renamed to "floor" throughout.
+- **Reference write-up and failure tests (Step 7)** — the README becomes a write-up of the trade-offs and failure behavior, plus a script anyone can run that cuts a robot's network, restarts the broker, takes the database down, and prints a per-robot gap report.
+- **Drop-in kit (possible Step 9)** — a config-driven edge_agent (topics, rates, fields, clip triggers), proven by replaying a public real-robot recording. Build only if founder conversations show demand.
 
 ## Conventions
 

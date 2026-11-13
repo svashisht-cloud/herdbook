@@ -1,26 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Robot, Status, Telemetry, WsMessage } from './types'
+import type { Incident, Robot, Status, Telemetry, WsMessage } from './types'
 
 const BACKOFF_MIN_MS = 1000
 const BACKOFF_MAX_MS = 10000
 
 type Listener = (t: Telemetry) => void
+type IncidentListener = (i: Incident) => void
 
 /**
  * Fleet state from GET /api/robots plus live /ws updates.
  *
  * Reconnects with backoff (1 s doubling to 10 s) and reloads /api/robots on every
  * (re)connect, because a WebSocket doesn't replay what was missed (decisions log).
+ * `epoch` goes up on every (re)connect, so the open chart and the incidents list
+ * refetch too (decisions log: Reload everything on reconnect).
  */
 export function useFleet() {
   const [robots, setRobots] = useState<Record<string, Robot>>({})
   const [connected, setConnected] = useState(false)
+  const [epoch, setEpoch] = useState(0)
   const listeners = useRef(new Set<Listener>())
+  const incidentListeners = useRef(new Set<IncidentListener>())
 
   const subscribeTelemetry = useCallback((fn: Listener) => {
     listeners.current.add(fn)
     return () => {
       listeners.current.delete(fn)
+    }
+  }, [])
+
+  const subscribeIncident = useCallback((fn: IncidentListener) => {
+    incidentListeners.current.add(fn)
+    return () => {
+      incidentListeners.current.delete(fn)
     }
   }, [])
 
@@ -89,6 +101,7 @@ export function useFleet() {
       sock.onopen = () => {
         backoff = BACKOFF_MIN_MS
         setConnected(true)
+        setEpoch((e) => e + 1)
         void loadRobots()
       }
       sock.onmessage = (ev) => {
@@ -103,6 +116,8 @@ export function useFleet() {
           onTelemetry(t)
         } else if (msg.type === 'status') {
           onStatus(msg.robot_id, msg.status)
+        } else if (msg.type === 'incident') {
+          for (const fn of incidentListeners.current) fn(msg.incident)
         }
       }
       sock.onerror = () => sock.close()
@@ -124,5 +139,5 @@ export function useFleet() {
     }
   }, [])
 
-  return { robots, connected, subscribeTelemetry }
+  return { robots, connected, epoch, subscribeTelemetry, subscribeIncident }
 }

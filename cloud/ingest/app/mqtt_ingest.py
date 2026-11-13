@@ -51,11 +51,18 @@ INSERT INTO robots (robot_id, status) VALUES (%s, %s)
 ON CONFLICT (robot_id) DO UPDATE SET status = EXCLUDED.status
 """
 
-INSERT_INCIDENT = f"""
-INSERT INTO incidents (robot_id, ts, type, mcap_key, size_bytes)
-VALUES (%s, {TS}, %s, %s, %s)
-ON CONFLICT (mcap_key) DO NOTHING
+# Forward only: `recording` -> `ready`, never back (decisions log). RETURNING gives
+# the row only when it was inserted or moved to ready: exactly what to push live.
+UPSERT_INCIDENT = f"""
+INSERT INTO incidents (robot_id, event_ts, type, status, mcap_key, size_bytes)
+VALUES (%s, {TS}, %s, %s, %s, %s)
+ON CONFLICT (robot_id, event_ts) DO UPDATE
+    SET status = EXCLUDED.status, mcap_key = EXCLUDED.mcap_key, size_bytes = EXCLUDED.size_bytes
+    WHERE incidents.status = 'recording' AND EXCLUDED.status = 'ready'
+RETURNING id, robot_id, (extract(epoch from event_ts) * 1000)::bigint AS event_ts,
+          type, status, mcap_key, size_bytes
 """
+INCIDENT_STATUSES = ("recording", "ready")
 
 TELEMETRY_FIELDS = ("robot_id", "boot_id", "seq", "ts", "x", "y", "heading", "speed", "battery", "mode")
 
@@ -119,15 +126,23 @@ def parse_telemetry(payload, robot_id):
 
 def parse_event(payload, robot_id):
     d = _json_object(payload, robot_id)
+    status = d.get("status")
+    if status not in INCIDENT_STATUSES:
+        raise BadMessage("status must be 'recording' or 'ready'")
+    ready = status == "ready"
     size = d.get("size_bytes")
-    if size is not None and (not isinstance(size, int) or isinstance(size, bool)):
+    if size is None:
+        if ready:
+            raise BadMessage("size_bytes is required when ready")
+    elif not isinstance(size, int) or isinstance(size, bool):
         raise BadMessage("size_bytes must be an integer or null")
     return {
         "robot_id": robot_id,
         "seq": _int(d, "seq"),
-        "ts": _int(d, "ts"),
+        "event_ts": _int(d, "event_ts"),
         "type": _str(d, "type"),
-        "mcap_key": _str(d, "mcap_key"),
+        "status": status,
+        "mcap_key": _str(d, "mcap_key", required=ready),
         "size_bytes": size,
     }
 
@@ -263,6 +278,12 @@ class MqttIngest:
         return {"type": "status", "robot_id": robot_id, "status": status}
 
     def write_event(self, cur, event):
-        cur.execute(INSERT_INCIDENT, (event["robot_id"], event["ts"], event["type"],
-                                      event["mcap_key"], event["size_bytes"]))
-        return None
+        cur.execute(UPSERT_INCIDENT, (event["robot_id"], event["event_ts"], event["type"],
+                                      event["status"], event["mcap_key"], event["size_bytes"]))
+        row = cur.fetchone()
+        # Pushed on insert and on the change to ready; a repeat or a late `recording` isn't.
+        if row is None:
+            return None
+        cols = ("id", "robot_id", "event_ts", "type", "status", "mcap_key", "size_bytes")
+        # Nested: the row has its own `type` (the event type).
+        return {"type": "incident", "incident": dict(zip(cols, row))}
