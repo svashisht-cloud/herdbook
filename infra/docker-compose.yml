@@ -1,6 +1,6 @@
 name: fleet
 
-# Step 0: infrastructure. Step 1: four simulated robots. Step 3: ingest + API. The dashboard comes later.
+# Step 0: infrastructure. Step 1: four simulated robots. Step 3: ingest + API. Step 4: dashboard.
 # Run from this folder:  cp .env.example .env && docker compose up -d
 # Ports bind to 127.0.0.1 so nothing is reachable from your LAN.
 
@@ -154,6 +154,16 @@ services:
         condition: service_started
       minio-init:
         condition: service_completed_successfully
+
+  # Built React app behind nginx, which also proxies /api and /ws to ingest:
+  # one origin, no CORS. Open http://localhost:8080.
+  dashboard:
+    build: ../dashboard
+    image: fleet-dashboard
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - ingest
 
   # One-shot job: wait for MinIO, create the bucket, exit 0.
   # Reuses the server image because it bundles the client (as mcli, with an mc alias).

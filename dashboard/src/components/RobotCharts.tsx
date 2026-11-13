@@ -1,0 +1,113 @@
+import { useEffect, useState } from 'react'
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import type { Telemetry } from '../types'
+
+const WINDOW_MS = 10 * 60 * 1000
+
+/** Dedupe by (boot_id, seq), sort by ts, and keep the last 10 minutes. */
+function tidy(rows: Telemetry[]) {
+  const byKey = new Map<string, Telemetry>()
+  for (const r of rows) byKey.set(`${r.boot_id}:${r.seq}`, r)
+  const cutoff = Date.now() - WINDOW_MS
+  return [...byKey.values()].filter((r) => r.ts >= cutoff).sort((a, b) => a.ts - b.ts)
+}
+
+const timeFmt = (ts: number) => new Date(ts).toLocaleTimeString()
+
+interface Props {
+  robotId: string
+  subscribeTelemetry: (fn: (t: Telemetry) => void) => () => void
+}
+
+export function RobotCharts({ robotId, subscribeTelemetry }: Props) {
+  const [rows, setRows] = useState<Telemetry[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let loaded = false
+    const buffered: Telemetry[] = []
+    setRows([])
+    setError(null)
+
+    // Live rows that arrive before the history loads are buffered, then merged in.
+    const unsubscribe = subscribeTelemetry((t) => {
+      if (t.robot_id !== robotId) return
+      if (!loaded) buffered.push(t)
+      else setRows((prev) => tidy([...prev, t]))
+    })
+
+    fetch(`/api/robots/${encodeURIComponent(robotId)}/telemetry`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json() as Promise<Telemetry[]>
+      })
+      .then((history) => {
+        if (cancelled) return
+        loaded = true
+        setRows(tidy([...history, ...buffered]))
+      })
+      .catch((err) => {
+        if (cancelled) return
+        loaded = true
+        setRows(tidy(buffered))
+        setError(`Couldn't load history: ${err.message}`)
+      })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [robotId, subscribeTelemetry])
+
+  const data = rows.map((r) => ({
+    ts: r.ts,
+    speed: r.speed,
+    battery: r.battery == null ? null : r.battery * 100,
+  }))
+
+  return (
+    <section className="charts">
+      <h2>
+        {robotId} <span className="muted">last 10 minutes · {rows.length} points</span>
+      </h2>
+      {error && <p className="error">{error}</p>}
+      <div className="chart-grid">
+        <Chart title="Speed (m/s)" data={data} dataKey="speed" color="#2563eb" />
+        <Chart title="Battery (%)" data={data} dataKey="battery" color="#1f9d55" domain={[0, 100]} />
+      </div>
+    </section>
+  )
+}
+
+interface ChartProps {
+  title: string
+  data: { ts: number; speed: number; battery: number | null }[]
+  dataKey: 'speed' | 'battery'
+  color: string
+  domain?: [number, number]
+}
+
+function Chart({ title, data, dataKey, color, domain }: ChartProps) {
+  return (
+    <div className="chart">
+      <h3>{title}</h3>
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="#e5e7eb" />
+          <XAxis
+            dataKey="ts"
+            type="number"
+            scale="time"
+            domain={['dataMin', 'dataMax']}
+            tickFormatter={timeFmt}
+            minTickGap={40}
+          />
+          <YAxis domain={domain ?? ['auto', 'auto']} width={44} tickFormatter={(v: number) => v.toFixed(1)} />
+          <Tooltip labelFormatter={(v) => timeFmt(Number(v))} formatter={(v) => Number(v).toFixed(2)} />
+          <Line dataKey={dataKey} stroke={color} dot={false} isAnimationActive={false} connectNulls={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
