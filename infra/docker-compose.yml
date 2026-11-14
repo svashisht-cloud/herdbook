@@ -1,7 +1,7 @@
 name: fleet
 
 # Step 0: infrastructure. Step 1: four simulated robots. Step 3: ingest + API. Step 4: dashboard.
-# Step 5: event clips (event_recorder -> MinIO).
+# Step 5: event clips (event_recorder -> MinIO). Step 6: edge_agent's SQLite outbox.
 # Run from this folder:  cp .env.example .env && docker compose up -d
 # Ports bind to 127.0.0.1 so nothing is reachable from your LAN.
 
@@ -28,6 +28,9 @@ x-robot: &robot
     MINIO_BUCKET: ${MINIO_BUCKET}
     MINIO_ROBOT_USER: ${MINIO_ROBOT_USER}
     MINIO_ROBOT_PASSWORD: ${MINIO_ROBOT_PASSWORD}
+    # edge_agent's outbox (/data/queue.db) row cap; past it the oldest telemetry is dropped.
+    # Override for one robot with: QUEUE_CAP=200 docker compose up -d --no-deps robotN
+    QUEUE_CAP: ${QUEUE_CAP:-100000}
   # Lists don't merge either: each robot lists *robot-src next to its own /data volume.
   volumes:
     - &robot-src ../robot:/ws/src/herdbook_robot:ro
@@ -200,7 +203,7 @@ volumes:
   mosquitto-data:
   pgdata:
   minio-data:
-  # Per-robot /data: event clips waiting for upload (/data/clips), and the SQLite queue (Step 6).
+  # Per-robot /data: event clips waiting for upload (/data/clips) and edge_agent's outbox (/data/queue.db).
   robot1-data:
   robot2-data:
   robot3-data:
