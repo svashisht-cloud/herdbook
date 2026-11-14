@@ -15,7 +15,7 @@ from sensor_msgs.msg import BatteryState, PointCloud2
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 
-# The yard loop is an ellipse, in metres.
+# The floor loop is an ellipse, in metres.
 CENTER_X, CENTER_Y = 50.0, 30.0
 RADIUS_X, RADIUS_Y = 40.0, 20.0
 LAP_SECONDS = 120.0               # one full lap; speed ends up between ~1 and ~2 m/s

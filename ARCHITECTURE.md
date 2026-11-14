@@ -45,7 +45,9 @@ robot/          one ament_python ROS 2 package: fake_robot, edge_agent, event_re
 cloud/ingest/   FastAPI service: MQTT -> DB, REST, WebSocket
 dashboard/      React + Vite app
 infra/          docker-compose.yml, Mosquitto config, init.sql, .env (gitignored)
-scripts/        failure tests and reports: outage_kill_test.sh, gap_report.sh
+scripts/        reset.sh, failure_demo.sh, gap_report.sh, outage_kill_test.sh, recording_cue.sh,
+                robot.sh (fault/cut/restore one robot), lib.sh (shared helpers)
+Makefile        shortcuts: up, reset, gaps, fault/cut/restore ROBOT=robotN, failure, failure-quick, cue
 docs/           design.md, architecture diagram
 ```
 
@@ -138,7 +140,7 @@ Each entry has the format: decision — choice. Why.
 ### Step 4: dashboard (done)
 
 - **Dashboard serving** — an nginx container serves the built app and proxies /api and /ws to ingest. That gives one `docker compose up` for the whole demo and one origin (no CORS), and it's the shape Step 8 deploys. Day-to-day UI work can use Vite's dev server with the same proxy paths.
-- **Map coordinates** — ROS y points up and SVG y points down, so the map flips y. The yard has fixed bounds of 0–100 × 0–60 m.
+- **Map coordinates** — ROS y points up and SVG y points down, so the map flips y. The floor has fixed bounds of 0–100 × 0–60 m.
 - **Robot color comes from status only** — offline is grey and degraded is amber; the dashboard never guesses. A banner shows while the dashboard's own WebSocket is down, because otherwise every robot would freeze while still looking online.
 - **WebSocket reconnect** — reconnect with backoff (1 s doubling to 10 s) and reload GET /robots on every (re)connect, because a WebSocket doesn't replay what was missed.
 - **Reload everything on reconnect** — after a WebSocket reconnect, the open chart refetches its 10 minutes and the incidents list refetches its 24 h too, not just the robot list.
@@ -168,9 +170,16 @@ Each entry has the format: decision — choice. Why.
 - **Reconnect backoff** — `reconnect_delay_set(1, 5)`. paho 2.2's default max is 120 s (checked in the image); 5 s gets robots back within a few seconds of the broker (measured: 1.8 s after it reported running).
 - **Failure scripts** — `scripts/gap_report.sh [since_ms]` reports per (robot_id, boot_id) row count, min/max seq, seq gaps and ts gaps over 1 s using window functions, plus the rows left in each queue.db. It takes a start time because older test data has real gaps from before Step 6.
 
+### Step 7: failure testing (in progress)
+
+- **Reset script scope** — `scripts/reset.sh` runs `docker compose down -v`, then `up -d --build`, and returns only when minio-init has exited 0, ingest has logged its subscription and all 4 robots are `online` in GET /robots. It wipes every volume (DB, broker, MinIO, each robot's queue.db and clips), so every test run and the recording start from the same state. It never touches `infra/.env`.
+- **Failure script scope** — `scripts/failure_demo.sh` runs six scenarios with pass/fail asserts, each proving logged decisions: 1, robot3 cut 60 s (outbox); 2, broker down 30 s (ingest persistent session, retained status); 3, DB down 60 s (ingest DB retry, ack after commit, ingest stays up); 4, robot4 SIGKILLed mid-drain (ack-after-commit and dedupe, with redelivery shown by a temporary mosquitto_sub); 5, MinIO down during a clip upload (clip retry, forward-only incident status, exactly one `ready`); 6, robot1 cut 5 min (outbox and drain order: lag stays live, backlog arrives oldest first at ≤ 50 msg/s). `--quick` runs 1–3, `--scenario N` runs one, `--no-reset` skips the reset. It exits non-zero on any failed assert.
+- **Drain before report** — a scenario's gap report runs only after every robot's queue.db is empty (0 rows, or 1 row under 1 s old, which is in flight), and covers only rows since the scenario's start. Live data is sent before backlog, so a report taken mid-drain shows holes that aren't losses. `gap_report.sh --tsv` gives the script the same SQL in machine-readable form.
+- **Fault injection method** — one robot is cut with `docker network disconnect` and restored with `docker network connect` using compose's aliases (service name and container name); the robot keeps running, as on a real network drop. Shared services (broker, DB, MinIO) are stopped and started as containers. Events are fired before a cut or on robots that still have a network, with `timeout 5`, because `ros2 topic pub` hangs without one.
+- **Expected holes after a kill** — a hole between two boot_ids of the killed robot is labelled `expected: kill->restart hole, N s` and doesn't fail. Nothing ran in that time, so there is nothing to recover. A new boot_id on any other robot fails as an unexpected restart. Seq and ts gaps within one boot_id always fail.
+
 ## Planned
 
-- **Floor realism (after Steps 5–6, before the Step 7 recording)** — a generic warehouse floor: the dashboard draws aisles, pick stations and a charging area, and fake_robot follows aisle routes with stops, so mode switches between driving and picking. It also adds richer on-robot topics (tf, IMU, several diagnostic components with occasional WARN). It's generic on purpose so it doesn't resemble any employer's product. "Yard" is renamed to "floor" throughout.
 - **Reference write-up and failure tests (Step 7)** — the README becomes a write-up of the trade-offs and failure behavior, plus a script anyone can run that cuts a robot's network, restarts the broker, takes the database down, and prints a per-robot gap report.
 - **Interactive trigger — deferred.** A button needs a cloud -> edge command channel (new MQTT contract, stale-command handling) and is an abuse surface on a public deploy with no auth. Revisit at Step 8: slow auto-timer vs. button with TTL'd commands, per-robot cooldown and endpoint rate limit.
 - **Drop-in kit (possible Step 9)** — a config-driven edge_agent (topics, rates, fields, clip triggers), proven by replaying a public real-robot recording. Build only if founder conversations show demand.
@@ -181,7 +190,10 @@ Each entry has the format: decision — choice. Why.
 - **Lost clips stay `recording`** — a lost clip (writer failure, or a partial clip deleted on restart) leaves its incident at `recording` permanently. There's no `failed` status, because upload retries are unbounded, so lost and slow look the same.
 - **Offline buffer is bounded** — unsent telemetry and incident updates survive an edge_agent crash or container kill (SQLite outbox), except the last tick (under 100 ms) not yet written. The buffer holds at most QUEUE_CAP rows; past that the oldest telemetry is dropped, leaving a seq gap.
 - **queue.db and clips share `/data`** — the outbox and the clips waiting for upload sit on the same per-robot volume, with no disk quota between them. A long outage plus many events could fill the disk for both.
-- **`ros2 topic pub` hangs without a network** — in a container with no network, `ros2 topic pub` hangs, so failure scripts stop the broker instead of cutting the robot's network, and wrap pubs in `timeout 5`.
+- **`ros2 topic pub` hangs without a network** — in a container with no network, `ros2 topic pub` hangs, so failure scripts fire events before a cut or on robots that still have a network, never inside a cut container, and wrap pubs in `timeout 5`.
+- **Floor realism skipped** — The map is a fixed ellipse, mode is always driving, no tf, no IMU. Chosen to spend the time on failure testing and a write-up. Widening mode later changes the MQTT contract, the ingest validation and the dashboard.
+- **Not tested** — Postgres data loss (a lost or corrupted volume), broker persistence loss, and clock skew between robots and the cloud (ts and boot_id are robot wall-clock times).
+- **Fault injection is container-level** — disconnects and stopped containers, not real packet loss, latency, reordering or a flapping link.
 - **No migrations** — init.sql runs only on the first DB init. A schema change needs `docker volume rm fleet_pgdata` (and loses the data).
 
 ## Conventions

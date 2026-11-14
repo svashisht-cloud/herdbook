@@ -1,7 +1,7 @@
 import { STATUS_COLOR } from '../status'
 import type { Robot } from '../types'
 
-// Fixed yard bounds in metres (decisions log). ROS y points up, SVG y points down, so y is flipped.
+// Fixed floor bounds in metres (decisions log). ROS y points up, SVG y points down, so y is flipped.
 const W = 100
 const H = 60
 const GRID = 10
@@ -18,7 +18,7 @@ export function YardMap({ robots, selected, onSelect }: Props) {
   const xs = Array.from({ length: W / GRID + 1 }, (_, i) => i * GRID)
   const ys = Array.from({ length: H / GRID + 1 }, (_, i) => i * GRID)
   return (
-    <svg className="yard" viewBox={`-2 -2 ${W + 4} ${H + 4}`} role="img" aria-label="Yard map">
+    <svg className="yard" viewBox={`-2 -2 ${W + 4} ${H + 4}`} role="img" aria-label="Floor map">
       <g className="grid">
         {xs.map((x) => (
           <line key={`x${x}`} x1={x} y1={0} x2={x} y2={H} />
