@@ -3,10 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { yardFromMap, STAND_IN_YARD } from '../yard'
 import { loadMap } from './loadMap'
 import { FREE, OCCUPIED, cellAt, worldToCell, type MapGrid } from './occupancy'
+import { wallBoxes } from './walls'
 
-// The committed default map (tools/make_default_map.py). Its marker block is in the TOP-RIGHT corner
-// only, so this catches a flipped or mirrored loader.
+// The committed default map (tools/make_default_map.py, rasterized from robot/config/floor.json). Its
+// marker block is in the TOP-RIGHT corner only, so this catches a flipped or mirrored loader.
 const file = (name: string) => new Blob([readFileSync(new URL(`../../public/maps/${name}`, import.meta.url))])
+type Rect = [number, number, number, number]
+const floor = JSON.parse(new TextDecoder().decode(readFileSync(new URL('../../../robot/config/floor.json', import.meta.url)))) as {
+  walls: Rect[]
+  racks: Rect[]
+  route: { aisle_x: number[] }
+}
 
 const at = (g: MapGrid, x: number, y: number) => {
   const c = worldToCell(g, x, y)
@@ -27,11 +34,11 @@ describe('default map', async () => {
     expect(at(map.grid, 94, 6)).toBe(FREE) // flipped top-bottom
     expect(at(map.grid, 6, 6)).toBe(FREE)
   })
-  it('has the outer wall and keeps the robot loop free', () => {
-    expect(at(map.grid, 0.2, 30)).toBe(OCCUPIED)
-    for (let k = 0; k < 360; k++) {
-      const a = (k * Math.PI) / 180
-      expect(at(map.grid, 50 + 40 * Math.cos(a), 30 + 20 * Math.sin(a))).toBe(FREE)
-    }
+  it('has every floor.json wall and rack, with the aisles between racks free', () => {
+    for (const [x0, y0, x1, y1] of [...floor.walls, ...floor.racks]) expect(at(map.grid, (x0 + x1) / 2, (y0 + y1) / 2)).toBe(OCCUPIED)
+    for (const x of floor.route.aisle_x) for (let y = 14; y <= 46; y++) expect(at(map.grid, x, y)).toBe(FREE)
+  })
+  it('becomes one 3D box per wall and rack, plus two for the notched marker', () => {
+    expect(wallBoxes(map.grid)).toHaveLength(floor.walls.length + floor.racks.length + 2)
   })
 })

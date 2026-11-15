@@ -7,6 +7,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import make_default_map as m  # noqa: E402
 
+sys.path.insert(0, str(m.ROOT / "robot"))
+from herdbook_robot.route import Route  # noqa: E402  (pure Python: the same paths fake_robot drives)
+
 PGM = m.OUT_DIR / "yard.pgm"
 YAML = m.OUT_DIR / "yard.yaml"
 
@@ -53,18 +56,27 @@ class DefaultMapTest(unittest.TestCase):
                      "occupied_thresh: 0.65", "free_thresh: 0.25"):
             self.assertIn(line, self.yaml)
 
-    def test_robot_loop_plus_margin_is_free(self):
-        # All 4 robots drive the same ellipse (phases index * pi/2), so check the whole loop.
-        cx, cy, rx, ry = m.robot_loop()
+    def test_every_route_plus_margin_is_free(self):
+        # Each robot drives its own loop (floor.json assignments); sample all of them over one cycle.
+        cfg = m.load_floor()["route"]
         margin = m.SAFETY_MARGIN_M
+        steps = int(margin / m.RESOLUTION)
         offsets = [(dx * m.RESOLUTION, dy * m.RESOLUTION)
-                   for dx in range(-30, 31) for dy in range(-30, 31)
+                   for dx in range(-steps, steps + 1) for dy in range(-steps, steps + 1)
                    if math.hypot(dx, dy) * m.RESOLUTION <= margin]
-        for k in range(3600):
-            a = 2 * math.pi * k / 3600
-            x, y = cx + rx * math.cos(a), cy + ry * math.sin(a)
-            for dx, dy in offsets[::7]:  # a sparse disk is enough at 0.1 m pixels
-                self.assertTrue(self.free_at(x + dx, y + dy), f"blocked near ({x:.1f}, {y:.1f})")
+        for assignment in cfg["assignments"]:
+            route = Route(cfg, assignment)
+            t = 0.0
+            while t < route.cycle:
+                x, y = route.state(t)[:2]
+                for dx, dy in offsets[::5]:  # a sparse disk is enough at 0.1 m pixels
+                    self.assertTrue(self.free_at(x + dx, y + dy), f"blocked near ({x:.1f}, {y:.1f})")
+                t += 0.25
+
+    def test_floor_obstacles_are_occupied(self):
+        floor = m.load_floor()
+        for x0, y0, x1, y1 in floor["walls"] + floor["racks"]:
+            self.assertFalse(self.free_at((x0 + x1) / 2, (y0 + y1) / 2), f"{[x0, y0, x1, y1]} should be occupied")
 
     def test_marker_only_in_top_right(self):
         self.assertFalse(self.free_at(94, 54))  # marker

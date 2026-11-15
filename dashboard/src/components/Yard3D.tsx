@@ -1,12 +1,14 @@
 import { Line, OrbitControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from 'react'
 import {
   CanvasTexture,
   Color,
   DataTexture,
+  InstancedMesh,
   LinearMipmapLinearFilter,
   NearestFilter,
+  Object3D,
   RGBAFormat,
   SRGBColorSpace,
   Vector3,
@@ -14,6 +16,7 @@ import {
   type Mesh,
   type PerspectiveCamera,
 } from 'three'
+import { WALL_HEIGHT_M, wallBoxes, type WallBox } from '../map/walls'
 import { FOCUS_HEIGHT_M, homeView, stepCamera, type CameraPhase, type CameraView } from '../scene/camera'
 import { stepPose, type Pose2 } from '../scene/smoothing'
 import { rosToThree, yardPlane } from '../scene/transform'
@@ -79,7 +82,8 @@ const at = (x: number, y: number, h: number): [number, number, number] => {
 }
 
 export function Yard3D({ robots, selected, onSelect, trails, transition, onTransitionEnd }: Props) {
-  const { config: yard, image } = useYard()
+  const { config: yard, image, map } = useYard()
+  const walls = useMemo(() => (map ? wallBoxes(map.grid) : []), [map])
   const FRAME = mapFrame(yard) // the 2D map's frame: same aspect, so the top-down camera matches it
   const { center, size } = yardPlane(yard)
   const span = Math.max(...size)
@@ -147,6 +151,7 @@ export function Yard3D({ robots, selected, onSelect, trails, transition, onTrans
             polygonOffsetUnits={1}
           />
         </mesh>
+        <Walls boxes={walls} pop={pop} />
         <YardDecor yard={yard} />
         {robots.map((r) =>
           r.last_state ? <Trail key={`trail-${r.robot_id}`} robot={r} trails={trails} poses={poses} /> : null,
@@ -172,6 +177,43 @@ export function Yard3D({ robots, selected, onSelect, trails, transition, onTrans
         )}
       </Canvas>
     </div>
+  )
+}
+
+// The map's occupied cells standing up as boxes (decisions log: 3D walls), one instanced mesh for all of
+// them. They ignore the pointer, so a click on a wall still reaches the floor (deselect) or a robot, and
+// they pop up with the robots during a 2D<->3D transition.
+function Walls({ boxes, pop }: { boxes: WallBox[]; pop: Pop }) {
+  const group = useRef<Group>(null)
+  const mesh = useRef<InstancedMesh>(null)
+
+  useLayoutEffect(() => {
+    const m = mesh.current
+    if (!m) return
+    const o = new Object3D()
+    boxes.forEach((b, k) => {
+      o.position.set(...at((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, WALL_HEIGHT_M / 2))
+      o.scale.set(b.x1 - b.x0, WALL_HEIGHT_M, b.y1 - b.y0) // ROS y runs along three's z
+      o.updateMatrix()
+      m.setMatrixAt(k, o.matrix)
+    })
+    m.instanceMatrix.needsUpdate = true
+    m.computeBoundingSphere()
+  }, [boxes])
+
+  useFrame(() => {
+    if (group.current) group.current.scale.y = pop.current
+  })
+
+  if (boxes.length === 0) return null
+  return (
+    <group ref={group}>
+      {/* key: an instanced mesh's count is fixed at creation, so a different map needs a new one. */}
+      <instancedMesh key={boxes.length} ref={mesh} args={[undefined, undefined, boxes.length]} raycast={() => null}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color={C.mapOccupied} />
+      </instancedMesh>
+    </group>
   )
 }
 
