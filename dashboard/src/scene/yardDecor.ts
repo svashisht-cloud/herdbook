@@ -78,7 +78,8 @@ export function labelLayout(yard: YardConfig) {
     bottomBaseline: font * 1.3, // below the bottom edge, to the text baseline (SVG)
     bottomCenter: font * 0.95, // below the bottom edge, to the text's visual centre (3D sprite)
     leftGap: font * 0.6, // left of the left edge, to the text's right end
-    /** Rough rendered width of a label, for centring a 3D sprite on the same spot as right-aligned SVG text. */
+    /** Rendered width of a label, for centring a 3D sprite on the same spot as right-aligned SVG text.
+     *  0.6 em per character is JetBrains Mono's advance, so it's exact for the mono labels. */
     width: (text: string) => text.length * font * 0.6,
   }
 }

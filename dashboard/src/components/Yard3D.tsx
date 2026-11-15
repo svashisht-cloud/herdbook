@@ -18,15 +18,17 @@ import {
 } from 'three'
 import { WALL_HEIGHT_M, wallBoxes, type WallBox } from '../map/walls'
 import { FOCUS_HEIGHT_M, homeView, stepCamera, type CameraPhase, type CameraView } from '../scene/camera'
-import { stepPose, type Pose2 } from '../scene/smoothing'
+import { poseAt } from '../scene/interpolate'
+import type { Pose2 } from '../scene/smoothing'
 import { rosToThree, yardPlane } from '../scene/transform'
 import { hitRadius } from '../scene/pick'
 import { ROBOT_MODEL } from '../scene/robotModel'
-import { TRAIL_MAX_POINTS, segments as trailSegments } from '../scene/trail'
+import { TRAIL_MAX_POINTS, drawnPoints, segments as trailSegments } from '../scene/trail'
 import { INTRO_MS, OUTRO_MS, POP_MIN, easeInOutCubic, lerpView, popScale, progress, topDownView } from '../scene/transition'
 import { axes, edgeLabels, labelLayout, mapFrame, scaleHint } from '../scene/yardDecor'
 import { statusColor } from '../status'
 import { THEME } from '../theme'
+import type { Tracks } from '../useTracks'
 import type { Trails } from '../useTrails'
 import type { Robot } from '../types'
 import { gridLines, useYard, type YardConfig, type YardImage } from '../yard'
@@ -35,7 +37,7 @@ import { RobotModel, preloadRobotModel } from './RobotModel'
 
 preloadRobotModel(ROBOT_MODEL)
 
-// Thin R3F layer: geometry and wiring only. Transform, smoothing and color live in plain modules.
+// Thin R3F layer: geometry and wiring only. Transform, interpolation and color live in plain modules.
 const BOX: [number, number, number] = [2.4, 1, 1.6] // fallback body: length (along heading), height, width, metres
 const RING: [number, number] = [1.4, 1.75] // status ring inner/outer radius, metres
 const HALO: [number, number] = [1.9, 2.15] // selection halo, outside the status ring (same blue as the 2D map)
@@ -57,7 +59,7 @@ const TRAIL_INIT_POINTS: [number, number, number][] = Array.from({ length: TRAIL
 const TRAIL_INIT_COLORS: [number, number, number][] = Array.from({ length: TRAIL_SEGMENTS * 2 }, () => [1, 1, 1])
 const WHITE = new Color(1, 1, 1) // leaves per-vertex colors untouched (the material color multiplies them)
 
-// Each robot's drawn (smoothed) pose, written by RobotView every frame and read by the camera rig.
+// Each robot's drawn (interpolated) pose, written by RobotView every frame and read by the camera rig.
 type Poses = RefObject<Map<string, Pose2>>
 // Robot height scale during a 2D<->3D transition (1 = normal), written by TransitionRig.
 type Pop = RefObject<number>
@@ -69,6 +71,7 @@ interface Props {
   selected: string | null
   onSelect: (id: string | null) => void
   trails: Trails
+  tracks: Tracks
   transition: ViewTransition // 'in': fly down from the 2D-matching top view; 'out': fly back up
   onTransitionEnd: () => void
 }
@@ -81,7 +84,7 @@ const at = (x: number, y: number, h: number): [number, number, number] => {
   return [p[0], h, p[2]]
 }
 
-export function Yard3D({ robots, selected, onSelect, trails, transition, onTransitionEnd }: Props) {
+export function Yard3D({ robots, selected, onSelect, trails, tracks, transition, onTransitionEnd }: Props) {
   const { config: yard, image, map } = useYard()
   const walls = useMemo(() => (map ? wallBoxes(map.grid) : []), [map])
   const FRAME = mapFrame(yard) // the 2D map's frame: same aspect, so the top-down camera matches it
@@ -158,7 +161,15 @@ export function Yard3D({ robots, selected, onSelect, trails, transition, onTrans
         )}
         {robots.map((r) =>
           r.last_state ? (
-            <RobotView key={r.robot_id} robot={r} selected={r.robot_id === selected} poses={poses} pop={pop} onSelect={onSelect} />
+            <RobotView
+              key={r.robot_id}
+              robot={r}
+              selected={r.robot_id === selected}
+              poses={poses}
+              tracks={tracks}
+              pop={pop}
+              onSelect={onSelect}
+            />
           ) : null,
         )}
         <OrbitControls makeDefault target={initial.target} maxPolarAngle={Math.PI / 2 - 0.05} enabled={!transition} />
@@ -289,33 +300,25 @@ interface RobotViewProps {
   robot: Robot
   selected: boolean
   poses: Poses
+  tracks: Tracks
   pop: Pop
   onSelect: (id: string) => void
 }
 
-function RobotView({ robot, selected, poses, pop, onSelect }: RobotViewProps) {
+function RobotView({ robot, selected, poses, tracks, pop, onSelect }: RobotViewProps) {
   const group = useRef<Group>(null)
   const body = useRef<Group>(null)
   const hit = useRef<Mesh>(null)
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const viewportH = useThree((s) => s.size.height)
   const world = useMemo(() => new Vector3(), [])
-  const target = useRef<Pose2 | null>(null)
-  const drawn = useRef<Pose2 | null>(null)
-
-  // New telemetry only moves the target; useFrame eases the mesh toward it without React state.
-  useEffect(() => {
-    const s = robot.last_state
-    if (!s) return
-    const { position, yaw } = rosToThree(s)
-    target.current = { x: position[0], z: position[2], yaw }
-  }, [robot.last_state])
-
-  useFrame((_, dt) => {
+  // Every frame: the interpolated pose (decisions log: Pose interpolation), written to the mesh via refs.
+  useFrame(() => {
     const g = group.current
-    if (!g || !target.current) return
-    const p = stepPose(drawn.current, target.current, dt)
-    drawn.current = p
+    const s = poseAt(tracks.current.get(robot.robot_id) ?? [], Date.now()) ?? robot.last_state
+    if (!g || !s) return
+    const { position, yaw } = rosToThree(s)
+    const p: Pose2 = { x: position[0], z: position[2], yaw }
     poses.current.set(robot.robot_id, p)
     g.position.set(p.x, 0, p.z)
     g.rotation.y = p.yaw
@@ -398,14 +401,34 @@ function BoxBody() {
   )
 }
 
+// Canvas text can't wait for a web font the way CSS does: drawn before the font loads, it silently uses
+// the fallback for good. So labels redraw once the label font is ready (decisions log: Fonts).
+const LABEL_FONT = `600 36px ${THEME.font.mono}`
+function useLabelFontReady(): boolean {
+  const [ready, setReady] = useState(() => typeof document === 'undefined' || document.fonts.check(LABEL_FONT))
+  useEffect(() => {
+    if (ready) return
+    let alive = true
+    document.fonts
+      .load(LABEL_FONT)
+      .catch(() => undefined) // a failed font still draws, with the fallback
+      .finally(() => alive && setReady(true))
+    return () => {
+      alive = false
+    }
+  }, [ready])
+  return ready
+}
+
 // Text drawn to a canvas texture on a sprite, so it always faces the camera and stays in the WebGL scene.
 function Label({ text, position, height, color = C.text }: { text: string; position: [number, number, number]; height: number; color?: string }) {
+  const fontReady = useLabelFontReady()
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas')
     canvas.width = 256
     canvas.height = 64
     const ctx = canvas.getContext('2d')!
-    ctx.font = `600 36px ${THEME.font.family}`
+    ctx.font = LABEL_FONT
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillStyle = color
@@ -413,7 +436,7 @@ function Label({ text, position, height, color = C.text }: { text: string; posit
     const t = new CanvasTexture(canvas)
     t.colorSpace = SRGBColorSpace
     return t
-  }, [text, color])
+  }, [text, color, fontReady])
   useEffect(() => () => texture.dispose(), [texture])
   return (
     <sprite position={position} scale={[height * 4, height, 1]}>
@@ -475,8 +498,8 @@ function YardDecor({ yard }: { yard: YardConfig }) {
   )
 }
 
-// A fading line behind a robot (decisions log: Trails). Points come from the trail ref; the newest
-// vertex is the robot's smoothed drawn pose so the trail stays attached to the model. The geometry is
+// A fading line behind a robot (decisions log: Trails). Points come from the trail ref, up to the robot's
+// drawn time (drawnPoints); the newest vertex is the robot's interpolated pose so the trail stays attached. The geometry is
 // rebuilt imperatively a few times a second; fade blends the status color into the floor color.
 function Trail({ robot, trails, poses }: { robot: Robot; trails: Trails; poses: Poses }) {
   const line = useRef<ComponentRef<typeof Line>>(null)
@@ -489,7 +512,7 @@ function Trail({ robot, trails, poses }: { robot: Robot; trails: Trails; poses: 
     if (!l || since.current < TRAIL_REFRESH_S) return
     since.current = 0
     const now = Date.now()
-    const buf = trails.current.get(robot.robot_id) ?? []
+    const buf = drawnPoints(trails.current.get(robot.robot_id) ?? [], now)
     const segs = trailSegments(buf, now).map((s) => ({ a: [s.a.x, s.a.y], b: [s.b.x, s.b.y], fade: s.fade }))
     const last = buf[buf.length - 1]
     const head = poses.current.get(robot.robot_id)

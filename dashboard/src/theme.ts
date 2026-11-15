@@ -43,8 +43,11 @@ export const THEME = {
   },
   space: [0, 4, 8, 12, 16, 24, 32], // px; --space-0 .. --space-6
   radius: { sm: 4, md: 8, pill: 999 }, // px
+  // Self-hosted variable fonts in public/fonts (decisions log: Fonts). Mono for anything data-like (IDs,
+  // numbers, labels, tables, headings); sans for running text. The fallbacks keep the layout if they fail.
   font: {
-    family: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    mono: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+    sans: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
     size: { xs: 11, sm: 12, md: 14, lg: 16, xl: 18 }, // px
   },
 } as const
@@ -67,7 +70,8 @@ export function cssVariables(t: Theme = THEME): Record<string, string> {
   flattenColors(t.color, '--color', out)
   t.space.forEach((v, i) => (out[`--space-${i}`] = `${v}px`))
   for (const [k, v] of Object.entries(t.radius)) out[`--radius-${k}`] = `${v}px`
-  out['--font-family'] = t.font.family
+  out['--font-mono'] = t.font.mono
+  out['--font-sans'] = t.font.sans
   for (const [k, v] of Object.entries(t.font.size)) out[`--font-size-${k}`] = `${v}px`
   return out
 }
