@@ -1,8 +1,5 @@
-:root {
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  color: #1f2328;
-  background: #f6f7f9;
-}
+/* Every value comes from a token in src/theme.ts, written to :root as CSS variables by applyTheme()
+   (decisions log: Theme tokens). No color literals here. */
 
 * {
   box-sizing: border-box;
@@ -10,141 +7,339 @@
 
 body {
   margin: 0;
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+  color: var(--color-text);
+  background: var(--color-bg);
 }
 
-.app {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 16px;
-}
-
-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-h1 {
-  font-size: 20px;
-  margin: 0;
-}
-
-h2 {
-  font-size: 16px;
-  margin: 0 0 8px;
-}
-
+h1,
+h2,
 h3 {
-  font-size: 13px;
+  margin: 0;
+  color: var(--color-text);
+}
+h1 {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+h2 {
+  font-size: var(--font-size-lg);
   font-weight: 600;
-  margin: 0 0 4px;
-  color: #57606a;
+}
+h3 {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
 }
 
 .muted {
-  color: #6e7781;
+  color: var(--color-text-muted);
   font-weight: normal;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
-.live {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: #fff;
-}
-.live.on {
-  background: #1f9d55;
-}
-.live.off {
-  background: #cf222e;
-}
+/* Layout */
 
-.banner {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: #fff1f0;
-  border: 1px solid #f5c2c0;
-  color: #82071e;
-  font-size: 14px;
+.topbar {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+.topbar-inner,
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 56px;
+}
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
 }
 
 main {
-  margin-top: 16px;
   display: grid;
-  gap: 16px;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-6);
 }
 
 .top {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 16px;
+  gap: var(--space-4);
   align-items: start;
 }
-
-@media (max-width: 800px) {
+@media (max-width: 900px) {
   .top {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-.yard,
-.fleet,
-.charts,
-.incidents {
-  background: #fff;
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
+/* Panels */
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.panel > h2,
+.panel-head {
+  margin-bottom: var(--space-3);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
-.yard {
-  width: 100%;
+/* Status: a colored dot plus a label, so text contrast never depends on the status color. */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-text-muted);
+  flex: none;
+}
+.dot.recording {
+  background: var(--color-incident-recording);
+}
+.dot.ready {
+  background: var(--color-incident-ready);
+}
+.counts {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+}
+.live.on .dot {
+  background: var(--color-status-online);
+}
+.live.off {
+  color: var(--color-danger);
+}
+.live.off .dot {
+  background: var(--color-danger);
+}
+
+.banner {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-surface);
+  border: 1px solid var(--color-danger);
+  color: var(--color-text);
+}
+
+/* Map panel: 2D and 3D share the frame, floor and scale styling. */
+
+.yard,
+.yard3d {
   display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-muted);
+  background: var(--color-bg);
+}
+.yard .floor {
+  fill: var(--color-floor);
+}
+.yard .map-image {
+  image-rendering: pixelated;
 }
 .yard .grid line {
-  stroke: #eef0f2;
+  stroke: var(--color-floor-grid);
   stroke-width: 0.15;
 }
 .yard .border {
   fill: none;
-  stroke: #c4cad1;
+  stroke: var(--color-floor-boundary);
+  stroke-width: 0.35;
+}
+.yard .axes line {
+  stroke-width: 0.6;
+  stroke-linecap: round;
+}
+.yard .axis-x {
+  stroke: var(--color-axis-x);
+}
+.yard .axis-y {
+  stroke: var(--color-axis-y);
+}
+.yard .edge-labels text,
+.yard .scale text {
+  fill: var(--color-text-muted);
+}
+.yard .scale path {
+  fill: none;
+  stroke: var(--color-text-muted);
   stroke-width: 0.25;
+}
+.yard .trails line {
+  stroke-width: 0.5;
+  stroke-linecap: butt; /* round caps overlap at joints and show as dots under partial opacity */
 }
 .yard .robot {
   cursor: pointer;
 }
+.yard .robot .wheel {
+  fill: var(--color-robot-wheel);
+}
+.yard .robot .nose {
+  fill: var(--color-robot-nose);
+}
 .yard .robot text {
   font-size: 2.2px;
   text-anchor: middle;
-  fill: #1f2328;
+  fill: var(--color-text);
   pointer-events: none;
 }
 .yard .halo {
   fill: none;
-  stroke: #2563eb;
+  stroke: var(--color-accent);
   stroke-width: 0.4;
 }
 
-.fleet {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 14px;
+.yard3d {
+  overflow: hidden;
+  position: relative;
+  transition: opacity 150ms ease;
+}
+.yard3d.hidden {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .yard3d {
+    transition: none;
+  }
+}
+
+/* 2D<->3D switch: the 3D canvas overlays the 2D map while it flies in or out (same frame, same aspect). */
+.map-stage {
+  position: relative;
+}
+.map-layer.overlay {
+  position: absolute;
+  inset: 0;
+}
+.yard3d.loading {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+}
+.yard3d .show-all,
+.yard3d .scale-chip {
+  position: absolute;
+  z-index: 1;
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+.yard3d .show-all {
+  top: var(--space-2);
+  right: var(--space-2);
+  font-family: inherit;
+  cursor: pointer;
+}
+.yard3d .scale-chip {
+  bottom: var(--space-2);
+  left: var(--space-2);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
-.fleet th,
-.fleet td {
-  padding: 8px 10px;
-  text-align: left;
-  border-bottom: 1px solid #eef0f2;
+.view-toggle button {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  cursor: pointer;
 }
-.fleet th {
-  font-size: 12px;
-  color: #57606a;
+.view-toggle button + button {
+  border-left: 1px solid var(--color-border);
+}
+.view-toggle button:disabled {
+  cursor: progress;
+}
+.view-toggle button[aria-pressed='true'] {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
   font-weight: 600;
 }
-.fleet .num {
+
+/* Tables (fleet and incidents) */
+
+.fleet,
+.incidents table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-md);
+}
+.fleet th,
+.fleet td,
+.incidents th,
+.incidents td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.fleet th,
+.incidents th {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.fleet tbody tr:last-child td,
+.incidents tbody tr:last-child td {
+  border-bottom: 0;
+}
+.fleet .num,
+.incidents .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -152,72 +347,42 @@ main {
   cursor: pointer;
 }
 .fleet tbody tr:hover {
-  background: #f6f8fa;
+  background: var(--color-surface-raised);
 }
 .fleet tbody tr.selected {
-  background: #eaf1ff;
+  background: var(--color-surface-raised);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.incidents button {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.incidents button:hover {
+  border-color: var(--color-accent);
 }
 
-.badge {
-  color: #fff;
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-}
+/* Charts */
 
-.charts {
-  padding: 12px 16px;
-}
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
 }
 .chart {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .error {
-  color: #cf222e;
-  font-size: 13px;
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
 }
 
 .hint {
   margin: 0;
-}
-
-.incidents {
-  padding: 12px 16px;
-}
-.incidents table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-.incidents th,
-.incidents td {
-  padding: 6px 10px;
-  text-align: left;
-  border-bottom: 1px solid #eef0f2;
-}
-.incidents th {
-  font-size: 12px;
-  color: #57606a;
-  font-weight: 600;
-}
-.incidents .num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.badge.recording {
-  background: #e0a000;
-}
-.badge.ready {
-  background: #1f9d55;
-}
-.incidents button {
-  font: inherit;
-  font-size: 13px;
-  padding: 2px 10px;
-  cursor: pointer;
 }

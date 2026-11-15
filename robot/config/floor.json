@@ -1,0 +1,56 @@
+{
+  "_comment": "Warehouse floor in metres, odom frame (x east, y north). Rects are [x0, y0, x1, y1]. Read by fake_robot (route, simulated lidar) and the dashboard map.",
+  "width": 100,
+  "height": 60,
+  "wall_height": 4.0,
+  "rack_height": 2.5,
+  "walls": [
+    [0, 0, 100, 0.3],
+    [0, 59.7, 100, 60],
+    [0, 0, 0.3, 60],
+    [99.7, 0, 100, 60],
+    [11.8, 14, 12.2, 46]
+  ],
+  "racks": [
+    [14, 14, 18, 29],
+    [14, 31, 18, 46],
+    [22, 14, 26, 29],
+    [22, 31, 26, 46],
+    [30, 14, 34, 29],
+    [30, 31, 34, 46],
+    [38, 14, 42, 29],
+    [38, 31, 42, 46],
+    [46, 14, 50, 29],
+    [46, 31, 50, 46],
+    [54, 14, 58, 29],
+    [54, 31, 58, 46],
+    [62, 14, 66, 29],
+    [62, 31, 66, 46],
+    [70, 14, 74, 29],
+    [70, 31, 74, 46],
+    [78, 14, 82, 29],
+    [78, 31, 82, 46]
+  ],
+  "stations": [
+    [2, 16.5, 4, 19.5],
+    [2, 24.5, 4, 27.5],
+    [2, 32.5, 4, 35.5],
+    [2, 40.5, 4, 43.5]
+  ],
+  "route": {
+    "_comment": "Robots drive the west column (column_x), lanes and aisles; they pick in bays at bay_x off the column. Robot N (1-4) uses assignments[N-1]: its own station and aisle indices, a near aisle plus a far one so every loop takes about as long.",
+    "column_x": 9,
+    "bay_x": 5,
+    "station_y": [18, 26, 34, 42],
+    "south_lane_y": 8,
+    "north_lane_y": 52,
+    "aisle_x": [20, 28, 36, 44, 52, 60, 68, 76],
+    "rack_stop_y": [22, 38],
+    "assignments": [
+      {"station": 0, "aisles": [0, 7]},
+      {"station": 1, "aisles": [1, 6]},
+      {"station": 2, "aisles": [2, 5]},
+      {"station": 3, "aisles": [3, 4]}
+    ]
+  }
+}

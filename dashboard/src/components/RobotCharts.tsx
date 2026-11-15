@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { THEME } from '../theme'
 import type { Telemetry } from '../types'
+
+const C = THEME.color
+const TICK = { fill: C.textMuted, fontSize: THEME.font.size.xs }
 
 const WINDOW_MS = 10 * 60 * 1000
 
@@ -73,14 +77,14 @@ export function RobotCharts({ robotId, epoch, subscribeTelemetry }: Props) {
   }))
 
   return (
-    <section className="charts">
+    <section className="panel charts">
       <h2>
         {robotId} <span className="muted">last 10 minutes · {rows.length} points</span>
       </h2>
       {error && <p className="error">{error}</p>}
       <div className="chart-grid">
-        <Chart title="Speed (m/s)" data={data} dataKey="speed" color="#2563eb" />
-        <Chart title="Battery (%)" data={data} dataKey="battery" color="#1f9d55" domain={[0, 100]} />
+        <Chart title="Speed (m/s)" data={data} dataKey="speed" color={C.accent} />
+        <Chart title="Battery (%)" data={data} dataKey="battery" color={C.chartBattery} domain={[0, 100]} />
       </div>
     </section>
   )
@@ -100,7 +104,7 @@ function Chart({ title, data, dataKey, color, domain }: ChartProps) {
       <h3>{title}</h3>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="#e5e7eb" />
+          <CartesianGrid stroke={C.borderMuted} />
           <XAxis
             dataKey="ts"
             type="number"
@@ -108,9 +112,18 @@ function Chart({ title, data, dataKey, color, domain }: ChartProps) {
             domain={['dataMin', 'dataMax']}
             tickFormatter={timeFmt}
             minTickGap={40}
+            tick={TICK}
+            stroke={C.border}
           />
-          <YAxis domain={domain ?? ['auto', 'auto']} width={44} tickFormatter={(v: number) => v.toFixed(1)} />
-          <Tooltip labelFormatter={(v) => timeFmt(Number(v))} formatter={(v) => Number(v).toFixed(2)} />
+          <YAxis domain={domain ?? ['auto', 'auto']} width={44} tickFormatter={(v: number) => v.toFixed(1)} tick={TICK} stroke={C.border} />
+          <Tooltip
+            labelFormatter={(v) => timeFmt(Number(v))}
+            formatter={(v) => Number(v).toFixed(2)}
+            contentStyle={{ background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: THEME.radius.sm }}
+            labelStyle={{ color: C.textMuted }}
+            itemStyle={{ color: C.text }}
+            cursor={{ stroke: C.border }}
+          />
           <Line dataKey={dataKey} stroke={color} dot={false} isAnimationActive={false} connectNulls={false} />
         </LineChart>
       </ResponsiveContainer>

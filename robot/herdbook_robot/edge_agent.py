@@ -48,7 +48,7 @@ TELEMETRY_PERIOD_S = 0.5   # 2 Hz
 INCIDENT_QOS = QoSProfile(
     depth=10, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL
 )
-MODE = "driving"           # always driving: the motion is a fixed loop with no stops (decisions log)
+DEFAULT_MODE = "driving"   # if diagnostics carries no mode key
 
 QUEUE_PATH = "/data/queue.db"   # the robot's named volume: survives restarts and crashes
 SENDER_PERIOD_S = 0.1           # 10 Hz sender tick
@@ -238,12 +238,20 @@ class EdgeAgent(Node):
             "heading": math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)),
             "speed": math.hypot(velocity.x, velocity.y),
             "battery": pct if math.isfinite(pct) else None,
-            "mode": MODE,
+            "mode": self.current_mode(),
         }
         # seq numbers the sample, not the send attempt: it goes up once per message
         # built, whatever happens to the send.
         self.seq += 1
         return message
+
+    def current_mode(self):
+        """fake_robot reports its mode (driving, lifting, picking) as a diagnostics key."""
+        for status in self.latest["diagnostics"].status:
+            for kv in status.values:
+                if kv.key == "mode":
+                    return kv.value
+        return DEFAULT_MODE
 
     def forward_incident(self, msg):
         """Incident updates go out whatever the robot's state: degraded doesn't block them."""
