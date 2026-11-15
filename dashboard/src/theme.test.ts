@@ -16,6 +16,8 @@ describe('cssVariables', () => {
     THEME.space.forEach((v, i) => expect(vars[`--space-${i}`]).toBe(`${v}px`))
     expect(vars['--radius-md']).toBe(`${THEME.radius.md}px`)
     expect(vars['--font-size-sm']).toBe(`${THEME.font.size.sm}px`)
+    expect(vars['--font-mono']).toBe(THEME.font.mono)
+    expect(vars['--font-sans']).toBe(THEME.font.sans)
   })
 })
 

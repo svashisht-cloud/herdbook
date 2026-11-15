@@ -1,103 +1,97 @@
-import { Suspense, lazy, useCallback, useState } from 'react'
-import { FleetList } from './components/FleetList'
+import { useCallback, useEffect, useState } from 'react'
 import { IncidentsPanel } from './components/IncidentsPanel'
-import { RobotCharts } from './components/RobotCharts'
-import { YardMap } from './components/YardMap'
+import { KpiBar } from './components/KpiBar'
+import { Sidebar } from './components/Sidebar'
+import { LogsPage } from './pages/LogsPage'
+import { MapPage, type ViewState } from './pages/MapPage'
+import { RobotsPage } from './pages/RobotsPage'
+import type { MapView, Page } from './route'
 import { useFleet } from './useFleet'
+import { useIncidents } from './useIncidents'
+import { useRoute } from './useRoute'
+import { useTracks } from './useTracks'
 import { useTrails } from './useTrails'
 import { STAND_IN_YARD, YardContext } from './yard'
 import { useYardMap } from './useYardMap'
 
-// three is large, so the 3D view loads only when someone switches to it.
-const Yard3D = lazy(() => import('./components/Yard3D').then((m) => ({ default: m.Yard3D })))
-// 'to3d' and 'to2d' are the animated switches (decisions log: View transition): the 2D map stays
-// mounted underneath while the 3D canvas flies in over it, or out of it.
-type View = '2d' | 'to3d' | '3d' | 'to2d'
+const TITLES: Record<Page, string> = { map: 'Floor map', robots: 'Robots', incidents: 'Incidents', logs: 'Logs' }
 
+// Layout (decisions log: App shell): sidebar, page header with the KPI bar, then the page. The route
+// (decisions log: Hash routes) holds the page, the map view and the selected robot.
 export function App() {
   const { robots, connected, epoch, subscribeTelemetry, subscribeIncident } = useFleet()
-  const [selected, setSelected] = useState<string | null>(null)
-  const [view, setView] = useState<View>('2d')
+  const { route, navigate } = useRoute()
   const list = Object.values(robots).sort((a, b) => a.robot_id.localeCompare(b.robot_id))
+  // Trails, tracks and incidents live here, not in a page, so they keep their history across pages.
   const trails = useTrails(subscribeTelemetry, list)
+  const tracks = useTracks(subscribeTelemetry, list)
+  const incidents = useIncidents(epoch, subscribeIncident)
   const yard = useYardMap()
+
+  // The map view animates toward the route's view (decisions log: View transition). Off the map page
+  // there is nothing to animate, so it just takes the route's value.
+  const [view, setView] = useState<ViewState>(route.view)
   const busy = view === 'to3d' || view === 'to2d'
-  const shownAs = view === '2d' || view === 'to2d' ? '2d' : '3d'
-  const pick = (v: '2d' | '3d') => {
-    if (busy || v === shownAs) return
-    setView(v === '3d' ? 'to3d' : 'to2d')
-  }
+  useEffect(() => {
+    if (route.page !== 'map') setView(route.view)
+    else if (!busy && view !== route.view) setView(route.view === '3d' ? 'to3d' : 'to2d')
+  }, [route.page, route.view, view, busy])
   const onTransitionEnd = useCallback(() => setView((v) => (v === 'to3d' ? '3d' : v === 'to2d' ? '2d' : v)), [])
+
+  const select = useCallback((id: string | null) => navigate({ robot: id }, { replace: true }), [navigate])
+  const pickView = (v: MapView) => navigate({ view: v }, { replace: true })
+  const openIncidents = incidents.rows.filter((i) => i.status === 'recording').length
 
   return (
     <YardContext.Provider value={yard}>
-    <div className="app">
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">
-            <h1>Herdbook</h1>
-            <span className="muted">Fleet operations</span>
-          </div>
-          <span className={connected ? 'live on' : 'live off'}>
-            <i className="dot" />
-            {connected ? 'Live' : 'Disconnected'}
-          </span>
-        </div>
-      </header>
-      <main>
-        {/* Without this, every robot would freeze while still looking online (decisions log). */}
-        {!connected && (
-          <div className="banner" role="alert">
-            Live connection lost: robot positions and status are not updating. Reconnecting…
-          </div>
-        )}
-        {yard.error && (
-          <div className="banner" role="alert">
-            Couldn't load the yard map: {yard.error} Showing the {STAND_IN_YARD.width} × {STAND_IN_YARD.height} m stand-in.
-          </div>
-        )}
-        <div className="top">
-          <section className="panel map-panel">
-            <div className="panel-head">
-              <h2>Yard</h2>
-              <div className="view-toggle" role="group" aria-label="Map view">
-                {(['2d', '3d'] as const).map((v) => (
-                  <button key={v} type="button" aria-pressed={shownAs === v} disabled={busy} onClick={() => pick(v)}>
-                    {v.toUpperCase()}
-                  </button>
-                ))}
-              </div>
+      <div className="shell">
+        <Sidebar route={route} onNavigate={(patch) => navigate(patch)} connected={connected} openIncidents={openIncidents} />
+        <main>
+          <header className="page-head">
+            <h1>{TITLES[route.page]}</h1>
+            <KpiBar robots={list} incidents={incidents.rows} connected={connected} />
+          </header>
+          {/* Without this, every robot would freeze while still looking online (decisions log). */}
+          {!connected && (
+            <div className="banner" role="alert">
+              Live connection lost: robot positions and status are not updating. Reconnecting…
             </div>
-            <div className="map-stage">
-              {view !== '3d' && <YardMap robots={list} selected={selected} onSelect={setSelected} trails={trails} />}
-              {view !== '2d' && (
-                // Same element in every 3D state, so the canvas never remounts mid-switch; only the
-                // overlay class changes. While the 3D chunk loads, the 2D map simply stays visible.
-                <div className={busy ? 'map-layer overlay' : 'map-layer'}>
-                  <Suspense fallback={null}>
-                    <Yard3D
-                      robots={list}
-                      selected={selected}
-                      onSelect={setSelected}
-                      trails={trails}
-                      transition={view === 'to3d' ? 'in' : view === 'to2d' ? 'out' : null}
-                      onTransitionEnd={onTransitionEnd}
-                    />
-                  </Suspense>
-                </div>
-              )}
+          )}
+          {yard.error && (
+            <div className="banner" role="alert">
+              Couldn't load the floor map: {yard.error} Showing the {STAND_IN_YARD.width} × {STAND_IN_YARD.height} m stand-in.
             </div>
-          </section>
-          <FleetList robots={list} selected={selected} onSelect={setSelected} />
-        </div>
-        {selected ? (
-          <RobotCharts robotId={selected} epoch={epoch} subscribeTelemetry={subscribeTelemetry} />
-        ) : (
-          <p className="muted hint">Click a robot on the map or in the list to see its speed and battery.</p>
-        )}
-        <IncidentsPanel epoch={epoch} subscribeIncident={subscribeIncident} />
-      </main>
-    </div>
+          )}
+          {route.page === 'map' && (
+            <MapPage
+              robots={list}
+              selected={route.robot}
+              onSelect={select}
+              view={view}
+              onPickView={pickView}
+              onTransitionEnd={onTransitionEnd}
+              trails={trails}
+              tracks={tracks}
+              epoch={epoch}
+              subscribeTelemetry={subscribeTelemetry}
+            />
+          )}
+          {route.page === 'robots' && (
+            <RobotsPage
+              robots={list}
+              selected={route.robot}
+              onSelect={select}
+              onShowOnMap={(id) => navigate({ page: 'map', robot: id })}
+              epoch={epoch}
+              subscribeTelemetry={subscribeTelemetry}
+            />
+          )}
+          {route.page === 'incidents' && (
+            <IncidentsPanel rows={incidents.rows} error={incidents.error} onError={incidents.setError} />
+          )}
+          {route.page === 'logs' && <LogsPage />}
+        </main>
+      </div>
     </YardContext.Provider>
   )
 }

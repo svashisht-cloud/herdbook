@@ -1,3 +1,4 @@
+import { INTERP_DELAY_MS } from './interpolate'
 import { SNAP_DISTANCE_M } from './smoothing'
 
 // Trail buffer for one robot (decisions log: Trails). Pure: the caller keeps the array in a ref.
@@ -38,6 +39,17 @@ export function addPoint(buf: readonly TrailPoint[], p: { x: number; y: number }
   if (last && last.x === p.x && last.y === p.y) return prune(buf, now)
   const breakBefore = !!last && Math.hypot(p.x - last.x, p.y - last.y) > SNAP_DISTANCE_M
   return prune([...buf, { x: p.x, y: p.y, t: now, breakBefore }], now)
+}
+
+/**
+ * The points that may be drawn: robots are drawn INTERP_DELAY_MS in the past (decisions log: Pose
+ * interpolation), so newer points would put the trail ahead of the robot. The views then join the last
+ * of these to the robot's drawn pose.
+ */
+export function drawnPoints(buf: readonly TrailPoint[], now: number, delay = INTERP_DELAY_MS): TrailPoint[] {
+  let end = buf.length
+  while (end > 0 && buf[end - 1].t > now - delay) end--
+  return end === buf.length ? (buf as TrailPoint[]) : buf.slice(0, end)
 }
 
 /** 1 for a new point, falling exponentially with age, and 0 from the end of the window. */

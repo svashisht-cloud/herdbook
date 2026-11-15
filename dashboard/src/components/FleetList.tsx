@@ -2,13 +2,7 @@ import { statusColor } from '../status'
 import type { Status } from '../types'
 import type { Robot } from '../types'
 import { useNow } from '../useNow'
-
-function ago(ms: number) {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  return `${Math.floor(s / 3600)}h ago`
-}
+import { ago, pct } from '../format'
 
 interface Props {
   robots: Robot[]
@@ -47,7 +41,6 @@ export function FleetList({ robots, selected, onSelect }: Props) {
       </thead>
       <tbody>
         {robots.map((r) => {
-          const battery = r.last_state?.battery
           return (
             <tr
               key={r.robot_id}
@@ -62,7 +55,7 @@ export function FleetList({ robots, selected, onSelect }: Props) {
                 </span>
               </td>
               <td>{r.last_state?.mode ?? '—'}</td>
-              <td className="num">{battery == null ? '—' : `${Math.round(battery * 100)}%`}</td>
+              <td className="num">{pct(r.last_state?.battery)}</td>
               <td className="num">{r.last_seen == null ? 'never' : ago(now - r.last_seen)}</td>
             </tr>
           )

@@ -1,55 +1,15 @@
-import { useEffect, useState } from 'react'
 import type { Incident } from '../types'
-import { useNow } from '../useNow'
-
-const WINDOW_MS = 24 * 60 * 60 * 1000 // the dashboard shows the last 24 h (decisions log)
-
-/** Merge by id. Status moves forward only: a `recording` never replaces a `ready`. */
-function merge(prev: Map<number, Incident>, incoming: Incident[]) {
-  const next = new Map(prev)
-  for (const i of incoming) {
-    const cur = next.get(i.id)
-    if (cur?.status === 'ready' && i.status !== 'ready') continue
-    next.set(i.id, i)
-  }
-  return next
-}
 
 const fmtTime = (ts: number) => new Date(ts).toLocaleString()
 const fmtSize = (b: number | null) => (b == null ? '—' : `${(b / 1e6).toFixed(1)} MB`)
 
 interface Props {
-  epoch: number // goes up on every WebSocket (re)connect: refetch then
-  subscribeIncident: (fn: (i: Incident) => void) => () => void
+  rows: Incident[] // last 24 h, newest first (useIncidents)
+  error: string | null
+  onError: (message: string) => void
 }
 
-export function IncidentsPanel({ epoch, subscribeIncident }: Props) {
-  const [incidents, setIncidents] = useState(new Map<number, Incident>())
-  const [error, setError] = useState<string | null>(null)
-  const now = useNow()
-
-  useEffect(() => subscribeIncident((i) => setIncidents((prev) => merge(prev, [i]))), [subscribeIncident])
-
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/incidents')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json() as Promise<Incident[]>
-      })
-      .then((list) => {
-        if (cancelled) return
-        setError(null)
-        setIncidents((prev) => merge(prev, list))
-      })
-      .catch((err) => {
-        if (!cancelled) setError(`Couldn't load incidents: ${err.message}`)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [epoch])
-
+export function IncidentsPanel({ rows, error, onError }: Props) {
   const download = async (id: number) => {
     try {
       const res = await fetch(`/api/incidents/${id}/download`)
@@ -57,13 +17,9 @@ export function IncidentsPanel({ epoch, subscribeIncident }: Props) {
       const { url } = (await res.json()) as { url: string }
       window.location.assign(url)
     } catch (err) {
-      setError(`Download failed: ${(err as Error).message}`)
+      onError(`Download failed: ${(err as Error).message}`)
     }
   }
-
-  const rows = [...incidents.values()]
-    .filter((i) => i.event_ts >= now - WINDOW_MS)
-    .sort((a, b) => b.event_ts - a.event_ts || b.id - a.id)
 
   return (
     <section className="panel incidents">

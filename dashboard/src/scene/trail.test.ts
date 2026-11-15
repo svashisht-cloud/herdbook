@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SNAP_DISTANCE_M } from './smoothing'
-import { TRAIL_FADE_TAU_MS, TRAIL_MAX_POINTS, TRAIL_WINDOW_MS, addPoint, fadeAt, prune, segments, type TrailPoint } from './trail'
+import { INTERP_DELAY_MS } from './interpolate'
+import { TRAIL_FADE_TAU_MS, TRAIL_MAX_POINTS, TRAIL_WINDOW_MS, addPoint, drawnPoints, fadeAt, prune, segments, type TrailPoint } from './trail'
 
 const pt = (x: number, t: number, breakBefore = false): TrailPoint => ({ x, y: 0, t, breakBefore })
 
@@ -70,5 +71,14 @@ describe('segments and fade', () => {
   it('newer segments are brighter', () => {
     const s = segments([pt(0, 0), pt(1, 10_000), pt(2, 20_000)], 20_000)
     expect(s[1].fade).toBeGreaterThan(s[0].fade)
+  })
+})
+
+describe('drawnPoints', () => {
+  it('leaves out points newer than the interpolation delay, so the trail never leads the robot', () => {
+    const buf = [pt(0, 0), pt(1, 500), pt(2, 1000)]
+    expect(drawnPoints(buf, 1000 + INTERP_DELAY_MS).map((p) => p.x)).toEqual([0, 1, 2])
+    expect(drawnPoints(buf, 1000 + INTERP_DELAY_MS - 1).map((p) => p.x)).toEqual([0, 1])
+    expect(drawnPoints(buf, 0)).toEqual([])
   })
 })
