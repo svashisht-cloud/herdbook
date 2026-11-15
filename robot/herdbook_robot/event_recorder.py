@@ -1,6 +1,6 @@
 """event_recorder: turns an `event` into an incident and a 60 s MCAP clip.
 
-It keeps the last 30 s of serialized points, odom, diagnostics and event in a
+It keeps the last 30 s of serialized points, odom, diagnostics, event and tf in a
 ring buffer. On an event it publishes a `recording` incident update right away,
 records 30 s more, writes one MCAP to /data/clips, uploads it to MinIO and then
 publishes `ready` for every event in the clip (decisions log: Step 5).
@@ -32,6 +32,7 @@ from diagnostic_msgs.msg import DiagnosticArray
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
+from tf2_msgs.msg import TFMessage
 
 WINDOW_NS = 30 * 10**9           # 30 s before the event, and 30 s after it
 CLIPS_DIR = "/data/clips"
@@ -44,6 +45,7 @@ RECORDED = {
     "odom": (Odometry, "nav_msgs/msg/Odometry"),
     "diagnostics": (DiagnosticArray, "diagnostic_msgs/msg/DiagnosticArray"),
     "event": (String, "std_msgs/msg/String"),
+    "tf": (TFMessage, "tf2_msgs/msg/TFMessage"),   # odom -> base_link, so Foxglove can place points
 }
 
 # Handoff to edge_agent: a restarted edge_agent gets recent updates again (decisions log).
